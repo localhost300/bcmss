@@ -10,18 +10,20 @@ import { getJSON, postJSON } from "@/lib/utils/api";
 import InputField from "../InputField";
 
 const categories = ["Science", "Art", "Commercial", "Humanities", "Technical", "General"] as const;
+const bloodTypes = ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"] as const;
 
 const schema = z.object({
   studentId: z.string().min(1, { message: "Student ID is required!" }),
   name: z.string().min(1, { message: "Student name is required!" }),
   email: z.string().email({ message: "Please enter a valid email!" }).optional(),
-  phone: z.string().min(1, { message: "Phone number is required!" }).optional(),
   address: z.string().min(1, { message: "Address is required!" }),
   photo: z
     .string()
     .url({ message: "Photo must be a valid URL" })
     .optional()
     .or(z.literal("")),
+  dateOfBirth: z.string().min(1, { message: "Date of birth is required!" }),
+  bloodType: z.enum(bloodTypes, { message: "Select a blood type" }),
   grade: z.coerce
     .number({ invalid_type_error: "Grade must be a number" })
     .min(1, { message: "Grade must be at least 1" })
@@ -30,6 +32,9 @@ const schema = z.object({
   category: z.enum(categories, { message: "Select a category" }),
   guardianName: z.string().optional(),
   guardianPhone: z.string().optional(),
+  guardianEmail: z.string().email({ message: "Provide a valid guardian email!" }).optional().or(z.literal("")),
+  guardianRelationship: z.string().optional(),
+  existingGuardianId: z.number().int().positive().optional(),
   schoolId: z.string().min(1, { message: "Select a campus" }),
 });
 
@@ -43,6 +48,7 @@ type StudentFormProps = {
 };
 
 type Option = { id: number; name: string };
+type ParentOption = { id: number; name: string; email: string | null; phone: string | null };
 
 const StudentForm = ({ type, data, id, onSuccess }: StudentFormProps) => {
   const { activeSchoolId, schools, canSwitch } = useSchool();
@@ -55,6 +61,12 @@ const StudentForm = ({ type, data, id, onSuccess }: StudentFormProps) => {
   const [classOptions, setClassOptions] = useState<Option[]>([]);
   const [classesLoading, setClassesLoading] = useState(false);
   const [classesError, setClassesError] = useState<string | null>(null);
+  const [guardianOptions, setGuardianOptions] = useState<ParentOption[]>([]);
+  const [guardiansLoading, setGuardiansLoading] = useState(false);
+  const [guardiansError, setGuardiansError] = useState<string | null>(null);
+  const [useExistingGuardian, setUseExistingGuardian] = useState(
+    Boolean((data as any)?.existingGuardianId),
+  );
 
   const availableSchools = useMemo(
     () => (canSwitch ? schools : schools.filter((school) => school.id === scopeId)),
@@ -68,18 +80,44 @@ const StudentForm = ({ type, data, id, onSuccess }: StudentFormProps) => {
       studentId: data?.studentId ?? "",
       name: data?.name ?? "",
       email: data?.email ?? "",
-      phone: data?.phone ?? "",
       address: data?.address ?? "",
       photo: data?.photo ?? "",
+      dateOfBirth: data?.dateOfBirth ? data.dateOfBirth.slice(0, 10) : "",
+      bloodType: (data?.bloodType as Inputs["bloodType"]) ?? bloodTypes[0],
       grade: data?.grade ?? 1,
       className: (data as any)?.className ?? (data as any)?.class ?? "",
       category: (data?.category as Inputs["category"]) ?? "General",
       guardianName: data?.guardianName ?? "",
       guardianPhone: data?.guardianPhone ?? "",
+      guardianEmail: (data as any)?.guardianEmail ?? "",
+      guardianRelationship: (data as any)?.guardianRelationship ?? "",
+      existingGuardianId:
+        (data as any)?.existingGuardianId !== undefined
+          ? Number((data as any)?.existingGuardianId)
+          : undefined,
       schoolId: data?.schoolId ?? (canSwitch ? activeSchoolId : scopeId),
     }),
     [data, activeSchoolId, scopeId, canSwitch],
   );
+
+  const selectedGuardianId = watch("existingGuardianId");
+  const selectedGuardian = useMemo(
+    () =>
+      typeof selectedGuardianId === "number"
+        ? guardianOptions.find((option) => option.id === selectedGuardianId) ?? null
+        : null,
+    [guardianOptions, selectedGuardianId],
+  );
+
+  const handleToggleExistingGuardian = () => {
+    setUseExistingGuardian((prev) => {
+      const next = !prev;
+      if (!next) {
+        setValue("existingGuardianId", undefined);
+      }
+      return next;
+    });
+  };
 
   const {
     register,
@@ -87,6 +125,8 @@ const StudentForm = ({ type, data, id, onSuccess }: StudentFormProps) => {
     handleSubmit,
     formState: { errors },
     reset,
+    watch,
+    setValue,
   } = useForm<Inputs>({
     resolver: zodResolver(schema),
     defaultValues,
@@ -95,6 +135,73 @@ const StudentForm = ({ type, data, id, onSuccess }: StudentFormProps) => {
   useEffect(() => {
     reset(defaultValues);
   }, [defaultValues, reset]);
+
+  useEffect(() => {
+    if (
+      defaultValues.existingGuardianId !== undefined &&
+      defaultValues.existingGuardianId !== null
+    ) {
+      setUseExistingGuardian(true);
+    }
+  }, [defaultValues.existingGuardianId]);
+
+  useEffect(() => {
+    let ignore = false;
+
+    const loadGuardians = async () => {
+      setGuardiansLoading(true);
+      setGuardiansError(null);
+
+      try {
+        const response = await getJSON<{
+          items?: Array<{ id?: unknown; name?: unknown; email?: unknown; phone?: unknown }>;
+        }>("/api/parents?pageSize=200");
+
+        if (ignore) return;
+
+        const items = Array.isArray(response?.items) ? response.items : [];
+        const options = items
+          .map((item) => {
+            if (!item || typeof item !== "object") {
+              return null;
+            }
+            const id =
+              typeof item.id === "number"
+                ? item.id
+                : typeof item.id === "string"
+                  ? Number.parseInt(item.id, 10)
+                  : undefined;
+            const name = typeof item.name === "string" ? item.name : undefined;
+            const email = typeof item.email === "string" ? item.email : null;
+            const phone = typeof item.phone === "string" ? item.phone : null;
+            if (!id || !name) {
+              return null;
+            }
+            return { id, name, email, phone };
+          })
+          .filter((item): item is ParentOption => Boolean(item))
+          .sort((a, b) => a.name.localeCompare(b.name));
+        setGuardianOptions(options);
+      } catch (error) {
+        if (ignore) return;
+        console.error("[StudentForm] Unable to load guardians", error);
+        setGuardiansError(
+          error instanceof Error ? error.message : "Unable to load guardians.",
+        );
+        setGuardianOptions([]);
+      } finally {
+        if (!ignore) {
+          setGuardiansLoading(false);
+        }
+      }
+    };
+
+    void loadGuardians();
+
+    return () => {
+      ignore = true;
+    };
+  }, []);
 
   useEffect(() => {
     let ignore = false;
@@ -150,24 +257,57 @@ const StudentForm = ({ type, data, id, onSuccess }: StudentFormProps) => {
       return;
     }
 
-    const payload: Record<string, unknown> = {
-      ...formData,
-      email: formData.email?.trim() ?? "",
-      phone: formData.phone?.trim() ?? "",
-      className: formData.className.trim(),
-      guardianName: formData.guardianName?.trim() ?? "",
-      guardianPhone: formData.guardianPhone?.trim() ?? "",
-      action: type,
-    };
-
-    if (type === "update") {
-      payload.id = entityId;
+    if (useExistingGuardian) {
+      if (!formData.existingGuardianId || Number.isNaN(formData.existingGuardianId)) {
+        setErrorMessage("Select an existing guardian.");
+        setSubmitting(false);
+        return;
+      }
+    } else {
+      if (!formData.guardianEmail || !formData.guardianEmail.trim()) {
+        setErrorMessage("Guardian email is required when adding a new guardian.");
+        setSubmitting(false);
+        return;
+      }
     }
 
     if (type === "create" && (!formData.email || !formData.email.trim())) {
       setErrorMessage("Email is required to create a student account.");
       setSubmitting(false);
       return;
+    }
+
+    const payload: Record<string, unknown> = {
+      studentId: formData.studentId.trim(),
+      name: formData.name.trim(),
+      email: formData.email?.trim() ?? "",
+      address: formData.address?.trim() ?? "",
+      photo: formData.photo?.trim() ?? "",
+      dateOfBirth: formData.dateOfBirth,
+      bloodType: formData.bloodType,
+      grade: formData.grade,
+      className: formData.className.trim(),
+      category: formData.category,
+      guardianName: useExistingGuardian
+        ? ""
+        : formData.guardianName?.trim() ?? "",
+      guardianPhone: useExistingGuardian
+        ? ""
+        : formData.guardianPhone?.trim() ?? "",
+      guardianEmail: useExistingGuardian
+        ? ""
+        : formData.guardianEmail?.trim() ?? "",
+      guardianRelationship: formData.guardianRelationship?.trim() ?? "",
+      schoolId: formData.schoolId,
+      action: type,
+    };
+
+    if (useExistingGuardian && formData.existingGuardianId) {
+      payload.existingGuardianId = formData.existingGuardianId;
+    }
+
+    if (type === "update") {
+      payload.id = entityId;
     }
 
     try {
@@ -183,16 +323,21 @@ const StudentForm = ({ type, data, id, onSuccess }: StudentFormProps) => {
           studentId: "",
           name: "",
           email: "",
-          phone: "",
           address: "",
           photo: "",
+          dateOfBirth: "",
+          bloodType: bloodTypes[0],
           grade: 1,
           className: "",
           category: "General",
           guardianName: "",
           guardianPhone: "",
+          guardianEmail: "",
+          guardianRelationship: "",
+          existingGuardianId: undefined,
           schoolId: canSwitch ? activeSchoolId : scopeId,
         });
+        setUseExistingGuardian(false);
       }
 
       await Promise.resolve(onSuccess?.(response));
@@ -233,12 +378,36 @@ const StudentForm = ({ type, data, id, onSuccess }: StudentFormProps) => {
           error={errors.email}
         />
         <InputField
-          label="Phone"
-          name="phone"
-          defaultValue={defaultValues.phone}
+          label="Date of Birth"
+          name="dateOfBirth"
+          type="date"
+          defaultValue={defaultValues.dateOfBirth}
           register={register}
-          error={errors.phone}
+          error={errors.dateOfBirth}
         />
+        <div className="flex flex-col gap-2 w-full md:w-1/3">
+          <label className="text-xs text-gray-500">Blood Type</label>
+          <Controller
+            control={control}
+            name="bloodType"
+            render={({ field }) => (
+              <select
+                className="ring-[1.5px] ring-gray-300 p-2 rounded-md text-sm w-full"
+                value={field.value}
+                onChange={(event) => field.onChange(event.target.value as Inputs["bloodType"])}
+              >
+                {bloodTypes.map((typeOption) => (
+                  <option key={typeOption} value={typeOption}>
+                    {typeOption}
+                  </option>
+                ))}
+              </select>
+            )}
+          />
+          {errors.bloodType?.message && (
+            <p className="text-xs text-red-400">{errors.bloodType.message.toString()}</p>
+          )}
+        </div>
         <InputField
           label="Address"
           name="address"
@@ -346,20 +515,96 @@ const StudentForm = ({ type, data, id, onSuccess }: StudentFormProps) => {
       </div>
 
       <span className="text-xs text-gray-400 font-medium">Guardian Information</span>
-      <div className="flex justify-between flex-wrap gap-4">
+      <div className="flex flex-col gap-4">
+        <label className="flex items-center gap-2 text-sm text-gray-600">
+          <input
+            type="checkbox"
+            checked={useExistingGuardian}
+            onChange={handleToggleExistingGuardian}
+            className="accent-lamaPurple"
+          />
+          Use existing guardian
+        </label>
+
+        {guardiansError && (
+          <p className="text-xs text-red-400">{guardiansError}</p>
+        )}
+
+        {useExistingGuardian ? (
+          <div className="flex flex-col gap-4">
+            <div className="flex flex-col gap-2 w-full md:w-1/2">
+              <label className="text-xs text-gray-500">Existing Guardian</label>
+              <Controller
+                control={control}
+                name="existingGuardianId"
+                render={({ field }) => (
+                  <select
+                    className="ring-[1.5px] ring-gray-300 p-2 rounded-md text-sm w-full"
+                    value={field.value ?? ""}
+                    onChange={(event) => {
+                      const value = event.target.value;
+                      field.onChange(value ? Number(value) : undefined);
+                    }}
+                    disabled={guardiansLoading}
+                  >
+                    <option value="">
+                      {guardiansLoading ? "Loading guardians..." : "Select guardian"}
+                    </option>
+                    {guardianOptions.map((option) => (
+                      <option key={option.id} value={option.id}>
+                        {option.name}
+                        {option.email ? ` (${option.email})` : ""}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              />
+              {errors.existingGuardianId?.message && (
+                <p className="text-xs text-red-400">
+                  {errors.existingGuardianId.message.toString()}
+                </p>
+              )}
+            </div>
+            {selectedGuardian && (
+              <div className="rounded-md border border-gray-200 bg-gray-50 p-4 text-sm text-gray-600">
+                <p className="font-medium text-gray-700">{selectedGuardian.name}</p>
+                <p>Email: {selectedGuardian.email ?? "N/A"}</p>
+                <p>Phone: {selectedGuardian.phone ?? "N/A"}</p>
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="flex justify-between flex-wrap gap-4">
+            <InputField
+              label="Guardian Name"
+              name="guardianName"
+              defaultValue={defaultValues.guardianName}
+              register={register}
+              error={errors.guardianName}
+            />
+            <InputField
+              label="Guardian Email"
+              name="guardianEmail"
+              defaultValue={defaultValues.guardianEmail}
+              register={register}
+              error={errors.guardianEmail}
+            />
+            <InputField
+              label="Guardian Phone"
+              name="guardianPhone"
+              defaultValue={defaultValues.guardianPhone}
+              register={register}
+              error={errors.guardianPhone}
+            />
+          </div>
+        )}
+
         <InputField
-          label="Guardian Name"
-          name="guardianName"
-          defaultValue={defaultValues.guardianName}
+          label="Relationship"
+          name="guardianRelationship"
+          defaultValue={defaultValues.guardianRelationship}
           register={register}
-          error={errors.guardianName}
-        />
-        <InputField
-          label="Guardian Phone"
-          name="guardianPhone"
-          defaultValue={defaultValues.guardianPhone}
-          register={register}
-          error={errors.guardianPhone}
+          error={errors.guardianRelationship}
         />
       </div>
 

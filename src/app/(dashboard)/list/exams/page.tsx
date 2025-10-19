@@ -25,10 +25,6 @@ type ExamListItem = {
   examDate: string | null;
   examType: PrismaExamType;
   term: PrismaTerm;
-  startTime: string | null;
-  endTime: string | null;
-  room: string | null;
-  invigilator: string | null;
   classId: number;
   className: string | null;
   subjectId: number;
@@ -65,8 +61,7 @@ const EXAM_TYPE_LABELS: Record<PrismaExamType, string> = {
 const columns = [
   { header: "Exam", accessor: "exam", className: "p-4" },
   { header: "Type", accessor: "examType", className: "p-4 hidden md:table-cell" },
-  { header: "Window", accessor: "assessmentWindow", className: "p-4" },
-  { header: "Date", accessor: "examDate", className: "p-4 hidden sm:table-cell" },
+  { header: "Schedule", accessor: "schedule", className: "p-4 hidden sm:table-cell" },
   { header: "Actions", accessor: "action", className: "p-4" },
 ];
 
@@ -85,10 +80,21 @@ const formatDate = (value: string | null) => {
       });
 };
 
-const formatTimeRange = (start?: string | null, end?: string | null) => {
-  if (!start && !end) return "";
-  if (start && end) return `${start} – ${end}`;
-  return start ?? end ?? "";
+const parseAssessmentWindow = (
+  raw: string | null,
+): { startDate: string | null; endDate: string | null } => {
+  if (!raw) {
+    return { startDate: null, endDate: null };
+  }
+  try {
+    const parsed = JSON.parse(raw);
+    const startDate =
+      parsed && typeof parsed.startDate === "string" ? parsed.startDate : null;
+    const endDate = parsed && typeof parsed.endDate === "string" ? parsed.endDate : null;
+    return { startDate, endDate };
+  } catch {
+    return { startDate: null, endDate: null };
+  }
 };
 
 const ExamListPage = () => {
@@ -168,24 +174,34 @@ const ExamListPage = () => {
 
   const renderRow = useCallback(
     (exam: ExamListItem) => {
-      const dateLabel = formatDate(exam.examDate);
-      const timeLabel = formatTimeRange(exam.startTime, exam.endTime);
+      const windowDates = parseAssessmentWindow(exam.assessmentWindow);
+      const startIso = windowDates.startDate ?? exam.examDate;
+      const endIso = windowDates.endDate;
+      const startLabel = formatDate(startIso);
+      const endLabel = endIso ? formatDate(endIso) : null;
+      let scheduleLabel = "Not set";
+      if (startLabel !== "TBD" && endLabel && endLabel !== "TBD") {
+        scheduleLabel = `${startLabel} -> ${endLabel}`;
+      } else if (startLabel !== "TBD") {
+        scheduleLabel = startLabel;
+      } else if (endLabel && endLabel !== "TBD") {
+        scheduleLabel = endLabel;
+      } else if (exam.assessmentWindow) {
+        scheduleLabel = exam.assessmentWindow;
+      }
+
       const examTerm = TERM_LABELS[exam.term] ?? exam.term;
       const examType = EXAM_TYPE_LABELS[exam.examType] ?? exam.examType;
-      const windowLabel = exam.assessmentWindow?.trim() || "Not set";
 
-    const updatePayload = {
-      id: exam.id,
-      name: exam.name,
-      date: exam.examDate ? exam.examDate.slice(0, 10) : "",
-      startTime: exam.startTime ?? "",
-      endTime: exam.endTime ?? "",
-      classId: exam.classId,
-      subjectId: exam.subjectId,
-      room: exam.room ?? "",
-      invigilator: exam.invigilator ?? "",
-      examType: exam.examType,
-    };
+      const updatePayload = {
+        id: exam.id,
+        name: exam.name,
+        startDate: startIso ? startIso.slice(0, 10) : "",
+        endDate: endIso ? endIso.slice(0, 10) : "",
+        classId: exam.classId,
+        subjectId: exam.subjectId,
+        examType: exam.examType,
+      };
 
       return (
         <tr
@@ -201,13 +217,9 @@ const ExamListPage = () => {
             {exam.subjectName && (
               <div className="text-xs text-gray-400">Subject: {exam.subjectName}</div>
             )}
-            {timeLabel && (
-              <div className="text-xs text-gray-400">Time: {timeLabel}</div>
-            )}
           </td>
           <td className="p-4 hidden md:table-cell capitalize">{examType}</td>
-          <td className="p-4">{windowLabel}</td>
-          <td className="p-4 hidden sm:table-cell">{dateLabel}</td>
+          <td className="p-4 hidden sm:table-cell">{scheduleLabel}</td>
           <td className="p-4">
             <div className="flex items-center gap-2">
               {isAdmin ? (

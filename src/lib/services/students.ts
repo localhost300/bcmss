@@ -1,4 +1,4 @@
-import { Prisma, Student, StudentCategory } from "@prisma/client";
+import { Prisma, PrismaClient, Student, StudentCategory } from "@prisma/client";
 
 import prisma from "@/lib/prisma";
 import { NotFoundError } from "./errors";
@@ -13,7 +13,6 @@ type SaveStudentInput = {
   studentCode: string;
   name: string;
   email?: string | null;
-  phone?: string | null;
   address?: string | null;
   photo?: string | null;
   grade: number;
@@ -22,7 +21,14 @@ type SaveStudentInput = {
   schoolId: string;
   guardianName?: string | null;
   guardianPhone?: string | null;
+  guardianEmail?: string | null;
+  dateOfBirth?: Date | null;
+  bloodType?: string | null;
+  guardianParentId?: number | null;
+  guardianRelationship?: string | null;
 };
+
+type PrismaClientOrTransaction = PrismaClient | Prisma.TransactionClient;
 
 type ListStudentsFilters = PaginationParams & {
   search?: string;
@@ -35,7 +41,6 @@ export type StudentListItem = {
   studentId: string;
   name: string;
   email: string | null;
-  phone: string | null;
   address: string | null;
   photo: string | null;
   grade: number | null;
@@ -43,6 +48,9 @@ export type StudentListItem = {
   className: string | null;
   schoolId: string;
   schoolName: string;
+  dateOfBirth: string | null;
+  bloodType: string | null;
+  guardianEmail: string | null;
 };
 
 export type ListStudentsResult = {
@@ -56,6 +64,7 @@ export type ListStudentsResult = {
 };
 
 export type StudentDetail = StudentListItem & {
+  phone: string | null;
   guardianName: string | null;
   guardianPhone: string | null;
 };
@@ -75,6 +84,14 @@ const normaliseOptional = (value?: string | null): string | null => {
   }
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : null;
+};
+
+const normaliseBloodType = (value?: string | null): string | null => {
+  const trimmed = normaliseOptional(value);
+  if (!trimmed) {
+    return null;
+  }
+  return trimmed.toUpperCase();
 };
 
 const mapCategory = (category: string): StudentCategory => {
@@ -101,6 +118,7 @@ const studentSelect = {
   phone: true,
   guardianName: true,
   guardianPhone: true,
+  guardianEmail: true,
   address: true,
   photo: true,
   grade: true,
@@ -109,6 +127,8 @@ const studentSelect = {
   school: { select: { id: true, name: true } },
   className: true,
   class: { select: { name: true } },
+  dateOfBirth: true,
+  bloodType: true,
 } satisfies Prisma.StudentSelect;
 
 type StudentWithRelations = Prisma.StudentGetPayload<{ select: typeof studentSelect }>;
@@ -130,6 +150,9 @@ const mapStudentRecord = (record: StudentWithRelations): StudentDetail => {
     className,
     schoolId: record.schoolId,
     schoolName,
+    dateOfBirth: record.dateOfBirth ? record.dateOfBirth.toISOString() : null,
+    bloodType: record.bloodType ?? null,
+    guardianEmail: record.guardianEmail ?? null,
     guardianName: record.guardianName ?? null,
     guardianPhone: record.guardianPhone ?? null,
   };
@@ -148,6 +171,8 @@ export async function listStudents(filters: ListStudentsFilters = {}): Promise<L
       { name: { contains: query, mode: "insensitive" } },
       { email: { contains: query, mode: "insensitive" } },
       { phone: { contains: query, mode: "insensitive" } },
+       { guardianEmail: { contains: query, mode: "insensitive" } },
+       { bloodType: { contains: query, mode: "insensitive" } },
       { className: { contains: query, mode: "insensitive" } },
     ];
   }
@@ -178,8 +203,13 @@ export async function listStudents(filters: ListStudentsFilters = {}): Promise<L
 
   const items = records.map((record) => {
     const detail = mapStudentRecord(record);
-    // drop guardian info from list payload
-    const { guardianName: _ignore1, guardianPhone: _ignore2, ...listItem } = detail;
+    // drop guardian info and non-list fields from list payload
+    const {
+      guardianName: _ignore1,
+      guardianPhone: _ignore2,
+      phone: _ignore3,
+      ...listItem
+    } = detail;
     return listItem;
   });
 
@@ -211,25 +241,105 @@ export async function getStudentById(id: string | number | undefined): Promise<S
   return mapStudentRecord(record);
 }
 
-export async function createStudent(input: SaveStudentInput): Promise<Student> {
-  const { classId, className } = await resolveClass(input.className, input.schoolId);
+const resolveGuardian = async (
+  client: PrismaClientOrTransaction,
+  input: SaveStudentInput,
+): Promise<{
+  parentId: number | null;
+  name: string | null;
+  phone: string | null;
+  email: string | null;
+}> => {
+  if (input.guardianParentId) {
+    const parent = await client.parent.findUnique({
+      where: { id: input.guardianParentId },
+    });
 
-  return prisma.student.create({
-    data: {
-      studentCode: input.studentCode.trim(),
-      name: input.name.trim(),
-      email: normaliseOptional(input.email),
-      phone: normaliseOptional(input.phone),
-      address: normaliseOptional(input.address),
-      photo: normaliseOptional(input.photo),
-      grade: input.grade,
-      category: mapCategory(input.category),
-      classId,
-      className,
-      schoolId: input.schoolId.trim(),
-      guardianName: normaliseOptional(input.guardianName),
-      guardianPhone: normaliseOptional(input.guardianPhone),
+    if (!parent) {
+      throw new NotFoundError("Selected guardian was not found.");
+    }
+
+    return {
+      parentId: parent.id,
+      name: parent.name ?? null,
+      phone: parent.phone ?? null,
+      email: parent.email ?? null,
+    };
+  }
+
+  const name = normaliseOptional(input.guardianName);
+  const phone = normaliseOptional(input.guardianPhone);
+  const email = normaliseOptional(input.guardianEmail);
+
+  if (!email) {
+    // No email provided means we cannot create or link a parent account.
+    return {
+      parentId: null,
+      name,
+      phone,
+      email: null,
+    };
+  }
+
+  const parent = await client.parent.upsert({
+    where: { email },
+    update: {
+      name: name ?? undefined,
+      phone: phone ?? undefined,
+      schoolId: input.schoolId?.trim() || undefined,
     },
+    create: {
+      name: name ?? email,
+      email,
+      phone: phone ?? null,
+      schoolId: input.schoolId?.trim() || null,
+    },
+  });
+
+  return {
+    parentId: parent.id,
+    name: parent.name ?? name ?? null,
+    phone: parent.phone ?? phone ?? null,
+    email: parent.email ?? email,
+  };
+};
+
+export async function createStudent(input: SaveStudentInput): Promise<Student> {
+  return prisma.$transaction(async (tx) => {
+    const { classId, className } = await resolveClass(tx, input.className, input.schoolId);
+    const guardian = await resolveGuardian(tx, input);
+
+    const student = await tx.student.create({
+      data: {
+        studentCode: input.studentCode.trim(),
+        name: input.name.trim(),
+        email: normaliseOptional(input.email),
+        address: normaliseOptional(input.address),
+        photo: normaliseOptional(input.photo),
+        grade: input.grade,
+        category: mapCategory(input.category),
+        classId,
+        className,
+        schoolId: input.schoolId.trim(),
+        guardianName: guardian.name ?? normaliseOptional(input.guardianName),
+        guardianPhone: guardian.phone ?? normaliseOptional(input.guardianPhone),
+        guardianEmail: guardian.email ?? normaliseOptional(input.guardianEmail),
+        dateOfBirth: input.dateOfBirth ?? null,
+        bloodType: normaliseBloodType(input.bloodType),
+      },
+    });
+
+    if (guardian.parentId) {
+      await tx.studentParent.create({
+        data: {
+          studentId: student.id,
+          parentId: guardian.parentId,
+          relationship: normaliseOptional(input.guardianRelationship),
+        },
+      });
+    }
+
+    return student;
   });
 }
 
@@ -238,33 +348,53 @@ export async function updateStudent(
   input: SaveStudentInput,
 ): Promise<Student> {
   const studentId = coerceToIntId(id, "student");
-  const { classId, className } = await resolveClass(input.className, input.schoolId);
 
-  try {
-    return await prisma.student.update({
-      where: { id: studentId },
-      data: {
-        studentCode: input.studentCode.trim(),
-        name: input.name.trim(),
-        email: normaliseOptional(input.email),
-        phone: normaliseOptional(input.phone),
-        address: normaliseOptional(input.address),
-        photo: normaliseOptional(input.photo),
-        grade: input.grade,
-        category: mapCategory(input.category),
-        classId,
-        className,
-        schoolId: input.schoolId.trim(),
-        guardianName: normaliseOptional(input.guardianName),
-        guardianPhone: normaliseOptional(input.guardianPhone),
-      },
-    });
-  } catch (error) {
-    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2025") {
-      throw new NotFoundError("Student not found.");
+  return prisma.$transaction(async (tx) => {
+    const { classId, className } = await resolveClass(tx, input.className, input.schoolId);
+    const guardian = await resolveGuardian(tx, input);
+
+    try {
+      const student = await tx.student.update({
+        where: { id: studentId },
+        data: {
+          studentCode: input.studentCode.trim(),
+          name: input.name.trim(),
+          email: normaliseOptional(input.email),
+          address: normaliseOptional(input.address),
+          photo: normaliseOptional(input.photo),
+          grade: input.grade,
+          category: mapCategory(input.category),
+          classId,
+          className,
+          schoolId: input.schoolId.trim(),
+          guardianName: guardian.name ?? normaliseOptional(input.guardianName),
+          guardianPhone: guardian.phone ?? normaliseOptional(input.guardianPhone),
+          guardianEmail: guardian.email ?? normaliseOptional(input.guardianEmail),
+          dateOfBirth: input.dateOfBirth ?? null,
+          bloodType: normaliseBloodType(input.bloodType),
+        },
+      });
+
+      await tx.studentParent.deleteMany({ where: { studentId } });
+
+      if (guardian.parentId) {
+        await tx.studentParent.create({
+          data: {
+            studentId,
+            parentId: guardian.parentId,
+            relationship: normaliseOptional(input.guardianRelationship),
+          },
+        });
+      }
+
+      return student;
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2025") {
+        throw new NotFoundError("Student not found.");
+      }
+      throw error;
     }
-    throw error;
-  }
+  });
 }
 
 export async function deleteStudent(id: string | number | undefined): Promise<void> {
@@ -280,13 +410,17 @@ export async function deleteStudent(id: string | number | undefined): Promise<vo
   }
 }
 
-const resolveClass = async (className: string, schoolId: string) => {
+const resolveClass = async (
+  client: PrismaClientOrTransaction,
+  className: string,
+  schoolId: string,
+) => {
   const trimmed = className.trim();
   if (!trimmed) {
     return { classId: null, className: null };
   }
 
-  const schoolClass = await prisma.schoolClass.findFirst({
+  const schoolClass = await client.schoolClass.findFirst({
     where: {
       schoolId,
       name: trimmed,

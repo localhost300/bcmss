@@ -6,23 +6,13 @@ import { coerceToIntId } from "./utils";
 
 type SaveExamInput = {
   name: string;
-  examDate: Date;
-  startTime: string;
-  endTime: string;
-  room?: string | null;
-  invigilator?: string | null;
+  startDate: Date;
+  endDate: Date;
   examType?: ExamType;
   term?: Term;
   classId: number;
   subjectId: number;
-};
-
-const normaliseOptional = (value?: string | null): string | null => {
-  if (value === undefined || value === null) {
-    return null;
-  }
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : null;
+  sessionId?: string;
 };
 
 const resolveClassAndSubject = async (classId: number, subjectId: number) => {
@@ -41,32 +31,62 @@ const resolveClassAndSubject = async (classId: number, subjectId: number) => {
   return { klass, subject };
 };
 
-const resolveSessionId = async (): Promise<string> => {
-  const session = await prisma.academicSession.findFirst({
+const resolveSessionId = async (requestedSessionId?: string): Promise<string> => {
+  if (requestedSessionId && requestedSessionId.trim()) {
+    const session = await prisma.academicSession.findUnique({
+      where: { id: requestedSessionId.trim() },
+    });
+
+    if (!session) {
+      throw new NotFoundError("Selected academic session was not found.");
+    }
+
+    return session.id;
+  }
+
+  const currentSession = await prisma.academicSession.findFirst({
     where: { isCurrent: true },
     orderBy: { startDate: "desc" },
   });
 
-  if (!session) {
-    throw new NotFoundError("No active academic session configured."
-    );
+  if (currentSession) {
+    return currentSession.id;
   }
 
-  return session.id;
+  const latestSession = await prisma.academicSession.findFirst({
+    orderBy: { startDate: "desc" },
+  });
+
+  if (latestSession) {
+    return latestSession.id;
+  }
+
+  throw new NotFoundError(
+    "No academic session configured. Create or activate a session before scheduling exams.",
+  );
 };
 
 export async function createExam(input: SaveExamInput): Promise<Exam> {
+  if (input.endDate < input.startDate) {
+    throw new InvalidIdError("End date cannot be earlier than start date.");
+  }
+
   const { klass } = await resolveClassAndSubject(input.classId, input.subjectId);
-  const sessionId = await resolveSessionId();
+  const sessionId = await resolveSessionId(input.sessionId);
+  const assessmentWindow = JSON.stringify({
+    startDate: input.startDate.toISOString(),
+    endDate: input.endDate.toISOString(),
+  });
 
   return prisma.exam.create({
     data: {
       name: input.name.trim(),
-      examDate: input.examDate,
-      startTime: input.startTime,
-      endTime: input.endTime,
-      room: normaliseOptional(input.room),
-      invigilator: normaliseOptional(input.invigilator),
+      examDate: input.startDate,
+      assessmentWindow,
+      startTime: null,
+      endTime: null,
+      room: null,
+      invigilator: null,
       examType: input.examType ?? ExamType.MIDTERM,
       term: input.term ?? Term.FIRST,
       schoolId: klass.schoolId,
@@ -82,21 +102,32 @@ export async function updateExam(
   input: SaveExamInput,
 ): Promise<Exam> {
   const examId = coerceToIntId(id, "exam");
+  if (input.endDate < input.startDate) {
+    throw new InvalidIdError("End date cannot be earlier than start date.");
+  }
+
   const { klass } = await resolveClassAndSubject(input.classId, input.subjectId);
+  const sessionId = input.sessionId ? await resolveSessionId(input.sessionId) : undefined;
+  const assessmentWindow = JSON.stringify({
+    startDate: input.startDate.toISOString(),
+    endDate: input.endDate.toISOString(),
+  });
 
   try {
     return await prisma.exam.update({
       where: { id: examId },
       data: {
         name: input.name.trim(),
-        examDate: input.examDate,
-        startTime: input.startTime,
-        endTime: input.endTime,
-        room: normaliseOptional(input.room),
-        invigilator: normaliseOptional(input.invigilator),
+        examDate: input.startDate,
+        assessmentWindow,
+        startTime: null,
+        endTime: null,
+        room: null,
+        invigilator: null,
         examType: input.examType ?? ExamType.MIDTERM,
         term: input.term ?? Term.FIRST,
         schoolId: klass.schoolId,
+        ...(sessionId ? { sessionId } : {}),
         classId: input.classId,
         subjectId: input.subjectId,
       },

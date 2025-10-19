@@ -11,25 +11,37 @@ import { buildExamTypeOptions } from "@/lib/exams";
 import { getJSON, postJSON } from "@/lib/utils/api";
 import InputField from "../InputField";
 
-const schema = z.object({
-  name: z.string().min(1, { message: "Exam name is required." }),
-  date: z.string().min(1, { message: "Exam date is required." }),
-  startTime: z.string().min(1, { message: "Start time is required." }),
-  endTime: z.string().min(1, { message: "End time is required." }),
-  classId: z
-    .coerce.number({ invalid_type_error: "Choose a class." })
-    .int()
-    .positive({ message: "Choose a class." })
-    .optional(),
-  subjectId: z
-    .coerce.number({ invalid_type_error: "Choose a subject." })
-    .int()
-    .positive({ message: "Choose a subject." })
-    .optional(),
-  examType: z.enum(["FINAL", "MIDTERM"], { invalid_type_error: "Select an exam type." }),
-  room: z.string().optional(),
-  invigilator: z.string().optional(),
-});
+const schema = z
+  .object({
+    name: z.string().min(1, { message: "Exam name is required." }),
+    startDate: z.string().min(1, { message: "Start date is required." }),
+    endDate: z.string().min(1, { message: "End date is required." }),
+    classId: z
+      .coerce.number({ invalid_type_error: "Choose a class." })
+      .int()
+      .positive({ message: "Choose a class." })
+      .optional(),
+    subjectId: z
+      .coerce.number({ invalid_type_error: "Choose a subject." })
+      .int()
+      .positive({ message: "Choose a subject." })
+      .optional(),
+    examType: z.enum(["FINAL", "MIDTERM"], { invalid_type_error: "Select an exam type." }),
+  })
+  .refine(
+    ({ startDate, endDate }) => {
+      const start = new Date(startDate);
+      const end = new Date(endDate);
+      if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+        return false;
+      }
+      return end >= start;
+    },
+    {
+      message: "End date cannot be before the start date.",
+      path: ["endDate"],
+    },
+  );
 
 type Inputs = z.infer<typeof schema>;
 
@@ -162,9 +174,8 @@ const ExamForm = ({ type, data, id, onSuccess }: ExamFormProps) => {
   const defaultValues = useMemo(
     () => ({
       name: data?.name ?? "",
-      date: data?.date ?? "",
-      startTime: data?.startTime ?? "",
-      endTime: data?.endTime ?? "",
+      startDate: data?.startDate ?? "",
+      endDate: data?.endDate ?? "",
       classId:
         type === "update"
           ? (data?.classId as number | undefined) ?? classOptions[0]?.id
@@ -173,8 +184,6 @@ const ExamForm = ({ type, data, id, onSuccess }: ExamFormProps) => {
         type === "update"
           ? (data?.subjectId as number | undefined) ?? subjectOptions[0]?.id
           : undefined,
-      room: data?.room ?? "",
-      invigilator: data?.invigilator ?? "",
       examType: data?.examType ?? "FINAL",
     }),
     [data, classOptions, subjectOptions, type],
@@ -218,14 +227,13 @@ const ExamForm = ({ type, data, id, onSuccess }: ExamFormProps) => {
     setSuccessMessage(null);
     setSubmitting(true);
 
+    const activeSessionId = sessionScope?.trim() ? sessionScope.trim() : undefined;
+
     const basePayload = {
       name: formData.name,
-      date: formData.date,
-      startTime: formData.startTime,
-      endTime: formData.endTime,
+      startDate: formData.startDate,
+      endDate: formData.endDate,
       examType: formData.examType,
-      room: formData.room?.trim() ?? "",
-      invigilator: formData.invigilator?.trim() ?? "",
       term: mapTermLabelToEnum(termScope),
     };
 
@@ -239,6 +247,7 @@ const ExamForm = ({ type, data, id, onSuccess }: ExamFormProps) => {
             try {
               await postJSON<{ message?: string }>("/api/exams", {
                 ...basePayload,
+                sessionId: activeSessionId,
                 action: "create" as const,
                 classId: klass.id,
                 subjectId: subject.id,
@@ -258,11 +267,8 @@ const ExamForm = ({ type, data, id, onSuccess }: ExamFormProps) => {
           );
           reset({
             name: "",
-            date: "",
-            startTime: "",
-            endTime: "",
-            room: "",
-            invigilator: "",
+            startDate: "",
+            endDate: "",
             examType: "FINAL",
             classId: undefined,
             subjectId: undefined,
@@ -288,6 +294,7 @@ const ExamForm = ({ type, data, id, onSuccess }: ExamFormProps) => {
           classId: formData.classId,
           subjectId: formData.subjectId,
           id: entityId,
+          sessionId: activeSessionId,
         };
 
         const response = await postJSON<{ message?: string }>("/api/exams", payload);
@@ -335,42 +342,20 @@ const ExamForm = ({ type, data, id, onSuccess }: ExamFormProps) => {
           error={errors.name}
         />
         <InputField
-          label="Date"
-          name="date"
+          label="Start Date"
+          name="startDate"
           type="date"
-          defaultValue={defaultValues.date}
+          defaultValue={defaultValues.startDate}
           register={register}
-          error={errors.date}
+          error={errors.startDate}
         />
         <InputField
-          label="Start Time"
-          name="startTime"
-          type="time"
-          defaultValue={defaultValues.startTime}
+          label="End Date"
+          name="endDate"
+          type="date"
+          defaultValue={defaultValues.endDate}
           register={register}
-          error={errors.startTime}
-        />
-        <InputField
-          label="End Time"
-          name="endTime"
-          type="time"
-          defaultValue={defaultValues.endTime}
-          register={register}
-          error={errors.endTime}
-        />
-        <InputField
-          label="Room"
-          name="room"
-          defaultValue={defaultValues.room}
-          register={register}
-          error={errors.room}
-        />
-        <InputField
-          label="Invigilator"
-          name="invigilator"
-          defaultValue={defaultValues.invigilator}
-          register={register}
-          error={errors.invigilator}
+          error={errors.endDate}
         />
 
         {type === "update" ? (

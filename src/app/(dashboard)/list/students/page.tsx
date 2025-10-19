@@ -18,7 +18,6 @@ type StudentRow = {
   studentId: string;
   name: string;
   email: string | null;
-  phone: string | null;
   address: string | null;
   photo: string | null;
   grade: number | null;
@@ -28,6 +27,9 @@ type StudentRow = {
   schoolName: string;
   guardianName: string | null;
   guardianPhone: string | null;
+  guardianEmail: string | null;
+  dateOfBirth: string | null;
+  bloodType: string | null;
 } & SchoolMeta;
 
 type StudentListResponse = {
@@ -47,11 +49,26 @@ const columns = [
   { header: "Category", accessor: "category", className: "hidden lg:table-cell" },
   { header: "Class", accessor: "className", className: "hidden lg:table-cell" },
   { header: "Campus", accessor: "schoolName", className: "hidden lg:table-cell" },
-  { header: "Phone", accessor: "phone", className: "hidden xl:table-cell" },
+  { header: "Blood Type", accessor: "bloodType", className: "hidden xl:table-cell" },
   { header: "Actions", accessor: "action" },
 ];
 
 const PAGE_SIZE = 10;
+
+const formatDateLabel = (value: string | null) => {
+  if (!value) {
+    return "N/A";
+  }
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return "N/A";
+  }
+  return parsed.toLocaleDateString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  });
+};
 
 const StudentListPage = () => {
   const { user } = useAuth();
@@ -158,6 +175,12 @@ const StudentListPage = () => {
             <p className="text-xs text-gray-500">
               {item.className ?? "Class not assigned"}
             </p>
+            <p className="text-xs text-gray-400">
+              DOB: {formatDateLabel(item.dateOfBirth)}
+            </p>
+            <p className="text-xs text-gray-400">
+              Guardian: {item.guardianEmail ?? "N/A"}
+            </p>
           </div>
         </td>
         <td className="hidden md:table-cell">{item.studentId}</td>
@@ -165,7 +188,7 @@ const StudentListPage = () => {
         <td className="hidden lg:table-cell">{item.category ?? "General"}</td>
         <td className="hidden lg:table-cell">{item.className ?? "—"}</td>
         <td className="hidden lg:table-cell">{item.schoolName}</td>
-        <td className="hidden xl:table-cell">{item.phone ?? "N/A"}</td>
+        <td className="hidden xl:table-cell">{item.bloodType ?? "N/A"}</td>
         <td>
           <div className="flex items-center gap-2">
             <Link href={`/list/students/${item.id}`}>

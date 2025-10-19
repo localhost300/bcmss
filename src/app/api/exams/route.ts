@@ -15,15 +15,13 @@ const requestSchema = z.object({
   action: z.enum(["create", "update"]),
   id: z.union([z.string().trim().min(1), z.number().int().positive()]).optional(),
   name: z.string().trim().min(1),
-  date: z.string().trim().min(1),
-  startTime: z.string().trim().min(1),
-  endTime: z.string().trim().min(1),
+  startDate: z.string().trim().min(1),
+  endDate: z.string().trim().min(1),
   classId: z.coerce.number().int().positive(),
   subjectId: z.coerce.number().int().positive(),
   examType: z.enum(["MIDTERM", "FINAL"]),
   term: z.enum(["FIRST", "SECOND", "THIRD"]).optional(),
-  room: z.string().trim().optional().nullable(),
-  invigilator: z.string().trim().optional().nullable(),
+  sessionId: z.string().trim().min(1).optional(),
 });
 
 const normalisePayload = (raw: unknown) => requestSchema.parse(raw);
@@ -180,18 +178,25 @@ export async function POST(request: NextRequest) {
 
     const examType = ExamType[payload.examType as keyof typeof ExamType];
     const term = payload.term ? Term[payload.term as keyof typeof Term] : undefined;
+    const startDate = parseDate(payload.startDate);
+    const endDate = parseDate(payload.endDate);
+
+    if (endDate < startDate) {
+      return NextResponse.json(
+        { message: "End date cannot be earlier than start date." },
+        { status: 400 },
+      );
+    }
 
     const examInput = {
       name: payload.name,
-      examDate: parseDate(payload.date),
-      startTime: payload.startTime,
-      endTime: payload.endTime,
-      room: payload.room ?? null,
-      invigilator: payload.invigilator ?? null,
+      startDate,
+      endDate,
       classId: payload.classId,
       subjectId: payload.subjectId,
       examType,
       term,
+      sessionId: payload.sessionId,
     };
 
     if (payload.action === "create") {

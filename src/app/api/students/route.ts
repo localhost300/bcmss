@@ -26,7 +26,6 @@ const requestSchema = z.object({
   studentId: z.string().trim().min(1),
   name: z.string().trim().min(1),
   email: z.string().trim().email().optional().nullable(),
-  phone: z.string().trim().min(1).optional().nullable(),
   address: z.string().trim().optional().nullable(),
   photo: z.string().trim().optional().nullable(),
   grade: z.number().int().min(1),
@@ -34,6 +33,11 @@ const requestSchema = z.object({
   category: z.string().trim().min(1),
   guardianName: z.string().trim().optional().nullable(),
   guardianPhone: z.string().trim().optional().nullable(),
+  guardianEmail: z.string().trim().email().optional().nullable(),
+  guardianRelationship: z.string().trim().optional().nullable(),
+  existingGuardianId: z.union([z.string().trim().min(1), z.number().int().positive()]).optional(),
+  dateOfBirth: z.string().trim().optional().nullable(),
+  bloodType: z.string().trim().max(16).optional().nullable(),
   schoolId: z.string().trim().min(1),
 });
 
@@ -44,6 +48,10 @@ const normalisePayload = (raw: unknown) =>
       typeof (raw as Record<string, unknown>)?.grade === "string"
         ? Number((raw as Record<string, unknown>).grade)
         : (raw as Record<string, unknown>)?.grade,
+    existingGuardianId:
+      typeof (raw as Record<string, unknown>)?.existingGuardianId === "string"
+        ? Number((raw as Record<string, unknown>).existingGuardianId)
+        : (raw as Record<string, unknown>)?.existingGuardianId,
   });
 
 const normaliseString = (value?: string | null) => {
@@ -52,6 +60,18 @@ const normaliseString = (value?: string | null) => {
   }
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : null;
+};
+
+const parseOptionalDate = (value?: string | null) => {
+  const trimmed = normaliseString(value);
+  if (!trimmed) {
+    return null;
+  }
+  const parsed = new Date(trimmed);
+  if (Number.isNaN(parsed.getTime())) {
+    throw new InvalidIdError("Invalid date supplied for date of birth.");
+  }
+  return parsed;
 };
 
 export async function GET(request: NextRequest) {
@@ -84,7 +104,6 @@ export async function POST(request: Request) {
       studentCode: payload.studentId,
       name: payload.name,
       email: payload.email ?? null,
-      phone: payload.phone ?? null,
       address: payload.address ?? null,
       photo: payload.photo ?? null,
       grade: payload.grade,
@@ -93,6 +112,14 @@ export async function POST(request: Request) {
       schoolId: payload.schoolId,
       guardianName: normaliseString(payload.guardianName),
       guardianPhone: normaliseString(payload.guardianPhone),
+      guardianEmail: normaliseString(payload.guardianEmail),
+      guardianRelationship: normaliseString(payload.guardianRelationship),
+      guardianParentId:
+        typeof payload.existingGuardianId === "number" && Number.isFinite(payload.existingGuardianId)
+          ? payload.existingGuardianId
+          : null,
+      dateOfBirth: parseOptionalDate(payload.dateOfBirth),
+      bloodType: normaliseString(payload.bloodType),
     };
 
     if (payload.action === "create") {

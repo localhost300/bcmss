@@ -156,8 +156,11 @@ model Student {
   name        String
   email       String?
   phone       String?
+  dateOfBirth DateTime?
+  bloodType   String?
   guardianName String?
   guardianPhone String?
+  guardianEmail String?
   address     String?
   photo       String?
   grade       Int?

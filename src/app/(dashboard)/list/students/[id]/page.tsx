@@ -15,12 +15,28 @@ interface SingleStudentPageProps {
   };
 }
 
+const formatDateLabel = (value: string | null) => {
+  if (!value) {
+    return "N/A";
+  }
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return "N/A";
+  }
+  return parsed.toLocaleDateString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  });
+};
+
 const buildInfoItems = (student: StudentDetail) => [
   { icon: "/blood.png", label: "Student ID", value: student.studentId },
-  { icon: "/date.png", label: "Grade", value: student.grade != null ? `Grade ${student.grade}` : "N/A" },
+  { icon: "/date.png", label: "Date of Birth", value: formatDateLabel(student.dateOfBirth ?? null) },
+  { icon: "/blood.png", label: "Blood Type", value: student.bloodType ?? "N/A" },
+  { icon: "/singleAttendance.png", label: "Grade", value: student.grade != null ? `Grade ${student.grade}` : "N/A" },
   { icon: "/singleBranch.png", label: "Category", value: student.category ?? "General" },
   { icon: "/mail.png", label: "Email", value: student.email ?? "N/A" },
-  { icon: "/phone.png", label: "Phone", value: student.phone ?? "N/A" },
   { icon: "/singleBranch.png", label: "Campus", value: student.schoolName },
 ];
 
@@ -28,6 +44,7 @@ const buildHighlightItems = (student: StudentDetail) => [
   { icon: "/singleBranch.png", label: "Class", value: student.className ?? "Not assigned" },
   { icon: "/singleAttendance.png", label: "Grade", value: student.grade != null ? String(student.grade) : "N/A" },
   { icon: "/singleLesson.png", label: "Guardian", value: student.guardianName ?? "Not assigned" },
+  { icon: "/mail.png", label: "Guardian Email", value: student.guardianEmail ?? "N/A" },
   { icon: "/singleClass.png", label: "Guardian Phone", value: student.guardianPhone ?? "N/A" },
 ];
 
