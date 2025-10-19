@@ -1,0 +1,210 @@
+
+"use client";
+
+import { useEffect, useMemo } from "react";
+import Image from "next/image";
+import Link from "next/link";
+import { useSearchParams } from "next/navigation";
+import {
+  currentUser,
+  studentsData,
+  studentMessagesData,
+  studentAttendanceData,
+  resultsData,
+  studentFinalResults,
+  studentMidtermResults,
+  announcementsData,
+} from "@/lib/data";
+import { useResults } from "@/contexts/ResultsContext";
+import { useSessionScope, useTermScope } from "@/contexts/SessionContext";
+import { gradeColors } from "@/lib/grades";
+const formatPercent = (value?: number | null) => {
+  if (value == null || Number.isNaN(value)) {
+    return "--";
+  }
+  return value.toFixed(1) + "%";
+};
+
+const StudentSelfResultsPage = () => {
+  const term = useTermScope();
+  const sessionId = useSessionScope();
+  const searchParams = useSearchParams();
+  const { getStudentDetails, gradeForPercentage, gradeForMidterm } = useResults();
+
+  const printMode = searchParams.get("print") === "1";
+
+  useEffect(() => {
+    if (printMode) {
+      const timer = setTimeout(() => window.print(), 250);
+      return () => clearTimeout(timer);
+    }
+  }, [printMode]);
+
+  const targetSummary = useMemo(() => {
+    const preferredName = currentUser.name;
+    return (
+      studentFinalResults.find(
+        (summary) =>
+          summary.studentName === preferredName &&
+          summary.sessionId === sessionId &&
+          summary.term === term
+      ) ||
+      studentMidtermResults.find(
+        (summary) =>
+          summary.studentName === preferredName &&
+          summary.sessionId === sessionId &&
+          summary.term === term
+      ) ||
+      studentFinalResults.find((summary) => summary.studentName === preferredName) ||
+      studentFinalResults[0]
+    );
+  }, [sessionId, term]);
+
+  const studentId = targetSummary?.studentId;
+  const studentName = targetSummary?.studentName ?? currentUser.name;
+
+  const studentProfile = useMemo(() => {
+    return studentsData.find((student) => student.name === studentName) ?? null;
+  }, [studentName]);
+  const studentDetails = useMemo(() => {
+    if (!studentId) {
+      return null;
+    }
+    return getStudentDetails({ studentId, term, sessionId });
+  }, [studentId, term, sessionId, getStudentDetails]);
+
+  const finalSummary =
+    studentDetails?.finalSummary ??
+    studentFinalResults.find(
+      (summary) =>
+        summary.studentId === studentId &&
+        summary.sessionId === sessionId &&
+        summary.term === term
+    );
+
+  const midtermSummary =
+    studentDetails?.midtermSummary ??
+    studentMidtermResults.find(
+      (summary) =>
+        summary.studentId === studentId &&
+        summary.sessionId === sessionId &&
+        summary.term === term
+    );
+  const finalGradeInfo = finalSummary ? gradeForPercentage(finalSummary.averageScore) : null;
+  const midtermAverageOutOf50 = midtermSummary
+    ? Number(((midtermSummary.averageScore / 100) * 50).toFixed(1))
+    : null;
+  const midtermGradeInfo = midtermAverageOutOf50 != null ? gradeForMidterm(midtermAverageOutOf50) : null;
+
+  const allSubjectRows = useMemo(() => {
+    if (!studentName) {
+      return [];
+    }
+    return resultsData
+      .filter((item) => item.student === studentName)
+      .sort((a, b) => a.date.localeCompare(b.date));
+  }, [studentName]);
+
+  const attendanceRecord = useMemo(() => {
+    if (!studentId) {
+      return null;
+    }
+    return (
+      studentAttendanceData.find(
+        (record) => record.studentId === studentId && record.term === term
+      ) ?? null
+    );
+  }, [studentId, term]);
+  const messages = useMemo(() => {
+    if (!studentId) {
+      return [];
+    }
+    return studentMessagesData
+      .filter((message) => message.studentId === studentId)
+      .sort((a, b) => b.date.localeCompare(a.date));
+  }, [studentId]);
+
+  const classAnnouncements = useMemo(() => {
+    if (!studentProfile?.class) {
+      return announcementsData.slice(0, 3);
+    }
+    const filtered = announcementsData.filter(
+      (item) => item.class === studentProfile.class
+    );
+    if (filtered.length) {
+      return filtered.slice(0, 3);
+    }
+    return announcementsData.slice(0, 3);
+  }, [studentProfile?.class]);
+
+  const finals = studentDetails?.finals ?? [];
+  const midterms = studentDetails?.midterm ?? [];
+  const bestSubject = useMemo(() => {
+    const combined = finals.length ? finals : midterms;
+    if (!combined.length) {
+      return null;
+    }
+    return combined.reduce((best, current) =>
+      current.percentage > (best?.percentage ?? 0) ? current : best
+    );
+  }, [finals, midterms]);
+
+  const needsAttentionSubject = useMemo(() => {
+    const combined = finals.length ? finals : midterms;
+    if (!combined.length) {
+      return null;
+    }
+    return combined.reduce((worst, current) =>
+      current.percentage < (worst?.percentage ?? 101) ? current : worst
+    );
+  }, [finals, midterms]);
+
+  const progressDelta =
+    finalSummary && midtermSummary
+      ? finalSummary.averageScore - midtermSummary.averageScore
+      : null;
+
+  if (!studentId) {
+    return (
+      <div className="m-4 mt-0 flex-1">
+        <div className="bg-white p-6 rounded-md border border-dashed border-gray-200 text-sm text-gray-500">
+          No student record could be resolved for the current account.
+        </div>
+      </div>
+    );
+  }
+
+  const latestSummaries = finals.length ? finals : midterms;
+  return (
+    <div className="m-4 mt-0 flex-1 space-y-8 print:m-0 print:space-y-6">
+      {finals.length > 0 && (
+        <section className="bg-white border border-gray-100 rounded-lg p-6 space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h3 className="text-lg font-semibold text-gray-900">Final Examination Details</h3>
+              <p className="text-xs text-gray-500">Scores calculated out of 100%</p>
+            </div>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full border border-gray-200 rounded-lg text-sm">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-4 py-3 text-left font-semibold text-xs uppercase text-gray-500">Subject</th>
+                  {(finals[0]?.components ?? []).map((component) => (
+                    <th
+                      key={component.componentId}
+                      className="px-4 py-3 text-center font-semibold text-xs uppercase text-gray-500"
+                    >
+                      {component.label}
+                      <div className="text-[10px] text-gray-400">/{component.maxScore}</div>
+                    </th>
+                  ))}
+                  <th className="px-4 py-3 text-center font-semibold text-xs uppercase text-gray-500">Total (%)</th>
+                  <th className="px-4 py-3 text-center font-semibold text-xs uppercase text-gray-500">Grade</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {finals.map((row) => {
+                  const gradeInfo = gradeForPercentage(row.percentage);
+                  const color = gradeColors[gradeInfo.grade] ?? "text-gray-600";
+                  return (

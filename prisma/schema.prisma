@@ -1,0 +1,342 @@
+// Prisma schema for Bishop Crowther backend
+// Generated based on current frontend data structures
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  admin
+  teacher
+  student
+  parent
+}
+
+enum StudentCategory {
+  SCIENCE
+  ART
+  COMMERCIAL
+  HUMANITIES
+  TECHNICAL
+  GENERAL
+}
+
+enum ExamType {
+  MIDTERM
+  FINAL
+}
+
+enum Term {
+  FIRST
+  SECOND
+  THIRD
+}
+
+model User {
+  id             String          @id @default(cuid())
+  clerkId        String?         @unique
+  email          String          @unique
+  firstName      String?
+  lastName       String?
+  phone          String?  
+  passwordHash   String?
+  role           Role
+  teacher        Teacher?
+  student        Student?
+  parent         Parent?
+  managedSchools SchoolManager[]
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+}
+
+model School {
+  id          String                    @id @default(cuid())
+  name        String
+  code        String                    @unique
+  address     String
+  city        String
+  state       String
+  country     String
+  phone       String
+  email       String
+  principal   String
+  established String
+  logo        String?
+  teachers    Teacher[]
+  students    Student[]
+  parents     Parent[]
+  classes     SchoolClass[]
+  subjects    Subject[]
+  exams       Exam[]
+  sessions    AcademicSessionOnSchool[]
+  managers    SchoolManager[]
+  createdAt   DateTime                  @default(now())
+  updatedAt   DateTime                  @updatedAt
+}
+
+model SchoolManager {
+  id       Int    @id @default(autoincrement())
+  userId   String
+  schoolId String
+  user     User   @relation(fields: [userId], references: [id])
+  school   School @relation(fields: [schoolId], references: [id])
+
+  @@unique([userId, schoolId])
+}
+
+model Teacher {
+  id          Int              @id @default(autoincrement())
+  teacherCode String           @unique
+  fullName    String?
+  email       String?
+  phone       String?
+  address     String?
+  photo       String?
+  schoolId    String
+  school      School           @relation(fields: [schoolId], references: [id])
+  userId      String?          @unique
+  user        User?            @relation(fields: [userId], references: [id])
+  subjects    TeacherSubject[]
+  classes     TeacherClass[]
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  SchoolClass SchoolClass[]
+}
+
+model Subject {
+  id          Int              @id @default(autoincrement())
+  name        String
+  code        String?
+  category    String?
+  creditHours Int?
+  description String?
+  schoolId    String
+  school      School           @relation(fields: [schoolId], references: [id])
+  teachers    TeacherSubject[]
+  classes     SubjectClass[]
+  exams       Exam[]
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  @@unique([schoolId, name])
+}
+
+model SchoolClass {
+  id            Int            @id @default(autoincrement())
+  name          String
+  code          String?
+  category      String?
+  section       String?
+  room          String?
+  supervisor    String?
+  capacity      Int
+  grade         String
+  schoolId      String
+  school        School         @relation(fields: [schoolId], references: [id])
+  formTeacherId Int?
+  formTeacher   Teacher?       @relation(fields: [formTeacherId], references: [id])
+  students      Student[]
+  teachers      TeacherClass[]
+  subjects      SubjectClass[]
+  exams         Exam[]
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  @@unique([schoolId, name])
+}
+
+model Student {
+  id          Int                 @id @default(autoincrement())
+  studentCode String              @unique
+  name        String
+  email       String?
+  phone       String?
+  guardianName String?
+  guardianPhone String?
+  address     String?
+  photo       String?
+  grade       Int?
+  category    StudentCategory     @default(GENERAL)
+  schoolId    String
+  school      School              @relation(fields: [schoolId], references: [id])
+  className   String?
+  classId     Int?
+  class       SchoolClass?        @relation(fields: [classId], references: [id])
+  userId      String?             @unique
+  user        User?               @relation(fields: [userId], references: [id])
+  guardians   StudentParent[]
+  attendances StudentAttendance[]
+  examScores  ExamScore[]
+  messages    StudentMessage[]
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+}
+
+model Parent {
+  id        Int             @id @default(autoincrement())
+  name      String
+  email     String?
+  phone     String?
+  address   String?
+  schoolId  String?
+  school    School?         @relation(fields: [schoolId], references: [id])
+  userId    String?         @unique
+  user      User?           @relation(fields: [userId], references: [id])
+  students  StudentParent[]
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
+}
+
+model StudentParent {
+  id           Int     @id @default(autoincrement())
+  studentId    Int
+  parentId     Int
+  relationship String?
+  student      Student @relation(fields: [studentId], references: [id])
+  parent       Parent  @relation(fields: [parentId], references: [id])
+
+  @@unique([studentId, parentId])
+}
+
+model TeacherSubject {
+  id        Int     @id @default(autoincrement())
+  teacherId Int
+  subjectId Int
+  teacher   Teacher @relation(fields: [teacherId], references: [id])
+  subject   Subject @relation(fields: [subjectId], references: [id])
+
+  @@unique([teacherId, subjectId])
+}
+
+model TeacherClass {
+  id        Int         @id @default(autoincrement())
+  teacherId Int
+  class     SchoolClass @relation(fields: [classId], references: [id])
+  classId   Int
+  teacher   Teacher     @relation(fields: [teacherId], references: [id])
+
+  @@unique([teacherId, classId])
+}
+
+model SubjectClass {
+  id        Int         @id @default(autoincrement())
+  subjectId Int
+  classId   Int
+  subject   Subject     @relation(fields: [subjectId], references: [id])
+  class     SchoolClass @relation(fields: [classId], references: [id])
+
+  @@unique([subjectId, classId])
+}
+
+model AcademicSession {
+  id        String                    @id
+  name      String
+  startDate DateTime
+  endDate   DateTime
+  isCurrent Boolean                   @default(false)
+  exams     Exam[]
+  schools   AcademicSessionOnSchool[]
+  createdAt DateTime                  @default(now())
+  updatedAt DateTime                  @updatedAt
+}
+
+model AcademicSessionOnSchool {
+  id        Int             @id @default(autoincrement())
+  sessionId String
+  schoolId  String
+  session   AcademicSession @relation(fields: [sessionId], references: [id])
+  school    School          @relation(fields: [schoolId], references: [id])
+
+  @@unique([sessionId, schoolId])
+}
+
+model Exam {
+  id               Int             @id @default(autoincrement())
+  name             String
+  examDate         DateTime
+  assessmentWindow String?
+  startTime        String?
+  endTime          String?
+  room             String?
+  invigilator      String?
+  examType         ExamType
+  term             Term
+  schoolId         String
+  school           School          @relation(fields: [schoolId], references: [id])
+  sessionId        String
+  session          AcademicSession @relation(fields: [sessionId], references: [id])
+  classId          Int
+  class            SchoolClass     @relation(fields: [classId], references: [id])
+  subjectId        Int
+  subject          Subject         @relation(fields: [subjectId], references: [id])
+  scores           ExamScore[]
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+}
+
+model ExamScore {
+  id        Int      @id @default(autoincrement())
+  examId    Int
+  studentId Int
+  total     Float?
+  details   Json?
+  exam      Exam     @relation(fields: [examId], references: [id])
+  student   Student  @relation(fields: [studentId], references: [id])
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([examId, studentId])
+}
+
+model StudentAttendance {
+  id        Int      @id @default(autoincrement())
+  studentId Int
+  date      DateTime
+  status    String
+  remarks   String?
+  student   Student  @relation(fields: [studentId], references: [id])
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([studentId, date])
+}
+
+model StudentMessage {
+  id        Int      @id @default(autoincrement())
+  studentId Int
+  sender    String
+  subject   String
+  body      String
+  createdAt DateTime @default(now())
+  student   Student  @relation(fields: [studentId], references: [id])
+}
+
+
+model StudentScoreRecord {
+  id          String   @id
+  studentId   Int
+  studentName String
+  classId     String
+  className   String
+  subject     String
+  examType    String
+  term        String
+  sessionId   String
+  components  Json
+  totalScore  Float?
+  maxScore    Float?
+  percentage  Float?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+
+
+
+
+
