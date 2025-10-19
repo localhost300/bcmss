@@ -20,8 +20,8 @@ type SaveTeacherInput = {
   address?: string | null;
   photo?: string | null;
   schoolId: string;
-  subjectNames: string[];
-  classNames: string[];
+  subjectNames?: string[];
+  classNames?: string[];
 };
 
 type PrismaClientOrTransaction = Prisma.TransactionClient | PrismaClient;
@@ -258,8 +258,8 @@ export async function createTeacher(input: SaveTeacherInput): Promise<Teacher> {
   const relationPayload = await resolveTeacherRelations(
     prisma,
     schoolId,
-    input.subjectNames,
-    input.classNames,
+    input.subjectNames ?? [],
+    input.classNames ?? [],
   );
 
   const teacher = await prisma.teacher.create({
@@ -289,12 +289,18 @@ export async function updateTeacher(
 ): Promise<Teacher> {
   const teacherId = coerceToIntId(id, "teacher");
   const schoolId = input.schoolId.trim();
-  const relationPayload = await resolveTeacherRelations(
-    prisma,
-    schoolId,
-    input.subjectNames,
-    input.classNames,
-  );
+  const shouldUpdateSubjects = Array.isArray(input.subjectNames);
+  const shouldUpdateClasses = Array.isArray(input.classNames);
+  let relationPayload: TeacherRelationPayload | null = null;
+
+  if (shouldUpdateSubjects || shouldUpdateClasses) {
+    relationPayload = await resolveTeacherRelations(
+      prisma,
+      schoolId,
+      input.subjectNames ?? [],
+      input.classNames ?? [],
+    );
+  }
 
   try {
     const teacher = await prisma.teacher.update({
@@ -310,9 +316,19 @@ export async function updateTeacher(
       },
     });
 
-    await prisma.teacherSubject.deleteMany({ where: { teacherId } });
-    await prisma.teacherClass.deleteMany({ where: { teacherId } });
-    await applyTeacherRelations(prisma, teacherId, relationPayload);
+    if (relationPayload) {
+      if (shouldUpdateSubjects) {
+        await prisma.teacherSubject.deleteMany({ where: { teacherId } });
+      }
+      if (shouldUpdateClasses) {
+        await prisma.teacherClass.deleteMany({ where: { teacherId } });
+      }
+
+      await applyTeacherRelations(prisma, teacherId, {
+        subjectIds: shouldUpdateSubjects ? relationPayload.subjectIds : [],
+        classIds: shouldUpdateClasses ? relationPayload.classIds : [],
+      });
+    }
 
     return teacher;
   } catch (error) {

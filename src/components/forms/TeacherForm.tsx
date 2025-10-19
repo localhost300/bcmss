@@ -6,7 +6,7 @@ import { Controller, useForm } from "react-hook-form";
 import { z } from "zod";
 
 import { useSchool, useSchoolScope } from "@/contexts/SchoolContext";
-import { getJSON, postJSON } from "@/lib/utils/api";
+import { postJSON } from "@/lib/utils/api";
 import InputField from "../InputField";
 
 const schema = z.object({
@@ -20,8 +20,6 @@ const schema = z.object({
     .url({ message: "Photo must be a valid URL!" })
     .optional()
     .or(z.literal("")),
-  subjects: z.array(z.string()).min(1, { message: "Select at least one subject!" }),
-  classes: z.array(z.string()).min(1, { message: "Assign at least one class!" }),
   schoolId: z.string().min(1, { message: "Select a campus" }),
 });
 
@@ -34,11 +32,6 @@ type TeacherFormProps = {
   onSuccess?: (payload?: unknown) => Promise<void> | void;
 };
 
-type Option = { id: number; name: string };
-
-const uniqueList = (values: string[]): string[] =>
-  Array.from(new Set(values.map((value) => value.trim()).filter((value) => value.length > 0)));
-
 const TeacherForm = ({ type, data, id, onSuccess }: TeacherFormProps) => {
   const { activeSchoolId, schools, canSwitch } = useSchool();
   const scopeId = useSchoolScope();
@@ -46,14 +39,6 @@ const TeacherForm = ({ type, data, id, onSuccess }: TeacherFormProps) => {
   const [submitting, setSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
-
-  const [subjectOptions, setSubjectOptions] = useState<Option[]>([]);
-  const [subjectsLoading, setSubjectsLoading] = useState(false);
-  const [subjectsError, setSubjectsError] = useState<string | null>(null);
-
-  const [classOptions, setClassOptions] = useState<Option[]>([]);
-  const [classesLoading, setClassesLoading] = useState(false);
-  const [classesError, setClassesError] = useState<string | null>(null);
 
   const availableSchools = useMemo(
     () => (canSwitch ? schools : schools.filter((school) => school.id === scopeId)),
@@ -70,8 +55,6 @@ const TeacherForm = ({ type, data, id, onSuccess }: TeacherFormProps) => {
       phone: data?.phone ?? "",
       address: data?.address ?? "",
       photo: data?.photo ?? "",
-      subjects: data?.subjects ?? [],
-      classes: data?.classes ?? [],
       schoolId: data?.schoolId ?? (canSwitch ? activeSchoolId : scopeId),
     }),
     [data, activeSchoolId, scopeId, canSwitch],
@@ -92,141 +75,6 @@ const TeacherForm = ({ type, data, id, onSuccess }: TeacherFormProps) => {
     reset(defaultValues);
   }, [defaultValues, reset]);
 
-  useEffect(() => {
-    let ignore = false;
-
-    const loadSubjects = async () => {
-      setSubjectsLoading(true);
-      setSubjectsError(null);
-      try {
-        const params = new URLSearchParams();
-        params.set("pageSize", "200");
-        if (scopeId) {
-          params.set("schoolId", scopeId);
-        }
-        const response = await getJSON<{ items?: Option[]; data?: Option[] }>(
-          `/api/subjects?${params.toString()}`,
-        );
-
-        if (ignore) return;
-
-        const items = Array.isArray(response?.items)
-          ? response.items
-          : Array.isArray((response as any)?.data)
-            ? (response as any).data
-            : [];
-        setSubjectOptions(items);
-      } catch (error) {
-        if (ignore) return;
-        console.error("[TeacherForm] Unable to load subjects", error);
-        setSubjectsError(
-          error instanceof Error ? error.message : "Unable to load subjects.",
-        );
-        setSubjectOptions([]);
-      } finally {
-        if (!ignore) {
-          setSubjectsLoading(false);
-        }
-      }
-    };
-
-    void loadSubjects();
-
-    return () => {
-      ignore = true;
-    };
-  }, [scopeId]);
-
-  useEffect(() => {
-    let ignore = false;
-
-    const loadClasses = async () => {
-      setClassesLoading(true);
-      setClassesError(null);
-      try {
-        const params = new URLSearchParams();
-        params.set("pageSize", "200");
-        if (scopeId) {
-          params.set("schoolId", scopeId);
-        }
-        const response = await getJSON<{ items?: Option[]; data?: Option[] }>(
-          `/api/classes?${params.toString()}`,
-        );
-
-        if (ignore) return;
-
-        const items = Array.isArray(response?.items)
-          ? response.items
-          : Array.isArray((response as any)?.data)
-            ? (response as any).data
-            : [];
-        setClassOptions(items);
-      } catch (error) {
-        if (ignore) return;
-        console.error("[TeacherForm] Unable to load classes", error);
-        setClassesError(error instanceof Error ? error.message : "Unable to load classes.");
-        setClassOptions([]);
-      } finally {
-        if (!ignore) {
-          setClassesLoading(false);
-        }
-      }
-    };
-
-    void loadClasses();
-
-    return () => {
-      ignore = true;
-    };
-  }, [scopeId]);
-
-  const renderCheckboxGroup = (
-    field: { value: string[]; onChange: (value: string[]) => void },
-    options: Option[],
-    errorText?: string,
-  ) => {
-    const currentValue = field.value ?? [];
-
-    return (
-      <div className="flex flex-col gap-2 w-full">
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-          {options.map((option) => {
-            const isChecked = currentValue.includes(option.name);
-            const handleToggle = () => {
-              if (isChecked) {
-                field.onChange(currentValue.filter((item) => item !== option.name));
-              } else {
-                field.onChange([...currentValue, option.name]);
-              }
-            };
-
-            return (
-              <label
-                key={option.id}
-                className="flex items-center gap-2 rounded-md border border-gray-200 px-3 py-2 text-sm cursor-pointer hover:border-lamaPurpleLight"
-              >
-                <input
-                  type="checkbox"
-                  checked={isChecked}
-                  onChange={handleToggle}
-                  className="accent-lamaPurple"
-                />
-                <span>{option.name}</span>
-              </label>
-            );
-          })}
-        </div>
-        {errorText && <p className="text-xs text-red-400">{errorText}</p>}
-        {!options.length && (subjectsLoading || classesLoading) && (
-          <p className="text-xs text-gray-400">Loading options…</p>
-        )}
-        {!options.length && !(subjectsLoading || classesLoading) && (
-          <p className="text-xs text-gray-400">No options available for this campus.</p>
-        )}
-      </div>
-    );
-  };
-
   const onSubmit = handleSubmit(async (formData) => {
     setErrorMessage(null);
     setSuccessMessage(null);
@@ -241,8 +89,6 @@ const TeacherForm = ({ type, data, id, onSuccess }: TeacherFormProps) => {
     const payload: Record<string, unknown> = {
       ...formData,
       photo: formData.photo?.trim() ?? "",
-      subjects: uniqueList(formData.subjects),
-      classes: uniqueList(formData.classes),
       action: type,
     };
 
@@ -263,8 +109,6 @@ const TeacherForm = ({ type, data, id, onSuccess }: TeacherFormProps) => {
           phone: "",
           address: "",
           photo: "",
-          subjects: [],
-          classes: [],
           schoolId: canSwitch ? activeSchoolId : scopeId,
         });
       }
@@ -354,32 +198,6 @@ const TeacherForm = ({ type, data, id, onSuccess }: TeacherFormProps) => {
         </div>
       </div>
 
-      <span className="text-xs text-gray-400 font-medium">Subjects</span>
-      {subjectsError ? (
-        <p className="text-xs text-red-400">{subjectsError}</p>
-      ) : (
-        <Controller
-          control={control}
-          name="subjects"
-          render={({ field }) =>
-            renderCheckboxGroup(field, subjectOptions, errors.subjects?.message?.toString())
-          }
-        />
-      )}
-
-      <span className="text-xs text-gray-400 font-medium">Class Assignments</span>
-      {classesError ? (
-        <p className="text-xs text-red-400">{classesError}</p>
-      ) : (
-        <Controller
-          control={control}
-          name="classes"
-          render={({ field }) =>
-            renderCheckboxGroup(field, classOptions, errors.classes?.message?.toString())
-          }
-        />
-      )}
-
       <div className="flex flex-col gap-2">
         {errorMessage && <p className="text-sm text-red-500">{errorMessage}</p>}
         {successMessage && <p className="text-sm text-green-600">{successMessage}</p>}
@@ -396,3 +214,4 @@ const TeacherForm = ({ type, data, id, onSuccess }: TeacherFormProps) => {
 };
 
 export default TeacherForm;
+

@@ -24,8 +24,8 @@ const requestSchema = z.object({
   phone: z.string().trim().min(1),
   address: z.string().trim().min(1),
   photo: z.string().trim().optional().nullable(),
-  subjects: z.array(z.string().trim().min(1)).min(1),
-  classes: z.array(z.string().trim().min(1)).min(1),
+  subjects: z.array(z.string().trim().min(1)).optional(),
+  classes: z.array(z.string().trim().min(1)).optional(),
   schoolId: z.string().trim().min(1),
 });
 
@@ -55,6 +55,11 @@ export async function POST(request: Request) {
     const json = await request.json();
     const payload = normalisePayload(json);
 
+    const subjectNames = Array.isArray(payload.subjects)
+      ? uniqueList(payload.subjects)
+      : undefined;
+    const classNames = Array.isArray(payload.classes) ? uniqueList(payload.classes) : undefined;
+
     const teacherInput = {
       teacherCode: payload.teacherId,
       fullName: payload.name,
@@ -63,8 +68,8 @@ export async function POST(request: Request) {
       address: payload.address,
       photo: payload.photo ?? null,
       schoolId: payload.schoolId,
-      subjectNames: uniqueList(payload.subjects),
-      classNames: uniqueList(payload.classes),
+      ...(subjectNames !== undefined ? { subjectNames } : {}),
+      ...(classNames !== undefined ? { classNames } : {}),
     };
 
     if (payload.action === "create") {
