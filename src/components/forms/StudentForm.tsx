@@ -1,7 +1,7 @@
 "use client";
 
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Controller, useForm } from "react-hook-form";
 import { z } from "zod";
 
@@ -64,9 +64,12 @@ const StudentForm = ({ type, data, id, onSuccess }: StudentFormProps) => {
   const [guardianOptions, setGuardianOptions] = useState<ParentOption[]>([]);
   const [guardiansLoading, setGuardiansLoading] = useState(false);
   const [guardiansError, setGuardiansError] = useState<string | null>(null);
-  const [useExistingGuardian, setUseExistingGuardian] = useState(
-    Boolean((data as any)?.existingGuardianId),
+  const hasExistingGuardianDefault = Boolean((data as any)?.existingGuardianId);
+  const [guardianMode, setGuardianMode] = useState<"new" | "existing">(
+    () => (hasExistingGuardianDefault ? "existing" : "new"),
   );
+  const guardianModeWasSetByUserRef = useRef(false);
+  const isMountedRef = useRef(true);
 
   const availableSchools = useMemo(
     () => (canSwitch ? schools : schools.filter((school) => school.id === scopeId)),
@@ -100,25 +103,64 @@ const StudentForm = ({ type, data, id, onSuccess }: StudentFormProps) => {
     [data, activeSchoolId, scopeId, canSwitch],
   );
 
-  const selectedGuardianId = watch("existingGuardianId");
-  const selectedGuardian = useMemo(
-    () =>
-      typeof selectedGuardianId === "number"
-        ? guardianOptions.find((option) => option.id === selectedGuardianId) ?? null
-        : null,
-    [guardianOptions, selectedGuardianId],
-  );
+  const refreshGuardians = useCallback(async () => {
+    setGuardiansLoading(true);
+    setGuardiansError(null);
+    try {
+      const response = await getJSON<{
+        items?: Array<{ id?: unknown; name?: unknown; email?: unknown; phone?: unknown }>;
+      }>("/api/parents?pageSize=200");
 
-  const handleToggleExistingGuardian = () => {
-    setUseExistingGuardian((prev) => {
-      const next = !prev;
-      if (!next) {
-        setValue("existingGuardianId", undefined);
+      const items = Array.isArray(response?.items) ? response.items : [];
+      const options = items
+        .map((item) => {
+          if (!item || typeof item !== "object") {
+            return null;
+          }
+          const id =
+            typeof item.id === "number"
+              ? item.id
+              : typeof item.id === "string"
+                ? Number.parseInt(item.id, 10)
+                : undefined;
+          const name = typeof item.name === "string" ? item.name : undefined;
+          const email = typeof item.email === "string" ? item.email : null;
+          const phone = typeof item.phone === "string" ? item.phone : null;
+          if (!id || !name) {
+            return null;
+          }
+          return { id, name, email, phone };
+        })
+        .filter((item): item is ParentOption => Boolean(item))
+        .sort((a, b) => a.name.localeCompare(b.name));
+
+      if (!isMountedRef.current) {
+        return;
       }
-      return next;
-    });
-  };
 
+      setGuardianOptions(options);
+    } catch (error) {
+      if (!isMountedRef.current) {
+        return;
+      }
+      console.error("[StudentForm] Unable to load guardians", error);
+      setGuardiansError(error instanceof Error ? error.message : "Unable to load guardians.");
+      setGuardianOptions([]);
+    } finally {
+      if (!isMountedRef.current) {
+        return;
+      }
+      setGuardiansLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    void refreshGuardians();
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, [refreshGuardians]);
   const {
     register,
     control,
@@ -132,76 +174,58 @@ const StudentForm = ({ type, data, id, onSuccess }: StudentFormProps) => {
     defaultValues,
   });
 
+  const selectedGuardianId = watch("existingGuardianId");
+  const selectedGuardian = useMemo(
+    () => {
+      if (guardianMode !== "existing") {
+        return null;
+      }
+      if (typeof selectedGuardianId === "number") {
+        return guardianOptions.find((option) => option.id === selectedGuardianId) ?? null;
+      }
+      return null;
+    },
+    [guardianMode, guardianOptions, selectedGuardianId],
+  );
+
+  const handleGuardianModeChange = (mode: "new" | "existing") => {
+    if (guardianMode === mode) {
+      return;
+    }
+    guardianModeWasSetByUserRef.current = true;
+    setGuardianMode(mode);
+  };
+
   useEffect(() => {
     reset(defaultValues);
-  }, [defaultValues, reset]);
+    guardianModeWasSetByUserRef.current = false;
+    const desiredMode: "new" | "existing" = hasExistingGuardianDefault ? "existing" : "new";
+    setGuardianMode((prev) => (prev === desiredMode ? prev : desiredMode));
+  }, [defaultValues, reset, hasExistingGuardianDefault]);
 
   useEffect(() => {
     if (
-      defaultValues.existingGuardianId !== undefined &&
-      defaultValues.existingGuardianId !== null
+      guardianOptions.length > 0 &&
+      guardianMode === "new" &&
+      !guardianModeWasSetByUserRef.current &&
+      !hasExistingGuardianDefault
     ) {
-      setUseExistingGuardian(true);
+      setGuardianMode("existing");
     }
-  }, [defaultValues.existingGuardianId]);
+    if (guardianOptions.length === 0 && guardianMode === "existing" && !hasExistingGuardianDefault) {
+      setGuardianMode("new");
+    }
+  }, [guardianOptions, guardianMode, hasExistingGuardianDefault]);
 
   useEffect(() => {
-    let ignore = false;
-
-    const loadGuardians = async () => {
-      setGuardiansLoading(true);
-      setGuardiansError(null);
-
-      try {
-        const response = await getJSON<{
-          items?: Array<{ id?: unknown; name?: unknown; email?: unknown; phone?: unknown }>;
-        }>("/api/parents?pageSize=200");
-
-        if (ignore) return;
-
-        const items = Array.isArray(response?.items) ? response.items : [];
-        const options = items
-          .map((item) => {
-            if (!item || typeof item !== "object") {
-              return null;
-            }
-            const id =
-              typeof item.id === "number"
-                ? item.id
-                : typeof item.id === "string"
-                  ? Number.parseInt(item.id, 10)
-                  : undefined;
-            const name = typeof item.name === "string" ? item.name : undefined;
-            const email = typeof item.email === "string" ? item.email : null;
-            const phone = typeof item.phone === "string" ? item.phone : null;
-            if (!id || !name) {
-              return null;
-            }
-            return { id, name, email, phone };
-          })
-          .filter((item): item is ParentOption => Boolean(item))
-          .sort((a, b) => a.name.localeCompare(b.name));
-        setGuardianOptions(options);
-      } catch (error) {
-        if (ignore) return;
-        console.error("[StudentForm] Unable to load guardians", error);
-        setGuardiansError(
-          error instanceof Error ? error.message : "Unable to load guardians.",
-        );
-        setGuardianOptions([]);
-      } finally {
-        if (!ignore) {
-          setGuardiansLoading(false);
-        }
-      }
-    };
-
-    void loadGuardians();
-
-    return () => {
-      ignore = true;
-    };
-  }, []);
+    if (guardianMode === "new") {
+      setValue("existingGuardianId", undefined);
+    } else {
+      setValue("guardianName", "");
+      setValue("guardianPhone", "");
+      setValue("guardianEmail", "");
+    }
+  }, [guardianMode, setValue]);
 
   useEffect(() => {
     let ignore = false;
@@ -257,7 +281,7 @@ const StudentForm = ({ type, data, id, onSuccess }: StudentFormProps) => {
       return;
     }
 
-    if (useExistingGuardian) {
+    if (guardianMode === "existing") {
       if (!formData.existingGuardianId || Number.isNaN(formData.existingGuardianId)) {
         setErrorMessage("Select an existing guardian.");
         setSubmitting(false);
@@ -288,13 +312,13 @@ const StudentForm = ({ type, data, id, onSuccess }: StudentFormProps) => {
       grade: formData.grade,
       className: formData.className.trim(),
       category: formData.category,
-      guardianName: useExistingGuardian
+      guardianName: guardianMode === "existing"
         ? ""
         : formData.guardianName?.trim() ?? "",
-      guardianPhone: useExistingGuardian
+      guardianPhone: guardianMode === "existing"
         ? ""
         : formData.guardianPhone?.trim() ?? "",
-      guardianEmail: useExistingGuardian
+      guardianEmail: guardianMode === "existing"
         ? ""
         : formData.guardianEmail?.trim() ?? "",
       guardianRelationship: formData.guardianRelationship?.trim() ?? "",
@@ -302,7 +326,7 @@ const StudentForm = ({ type, data, id, onSuccess }: StudentFormProps) => {
       action: type,
     };
 
-    if (useExistingGuardian && formData.existingGuardianId) {
+    if (guardianMode === "existing" && formData.existingGuardianId) {
       payload.existingGuardianId = formData.existingGuardianId;
     }
 
@@ -317,6 +341,10 @@ const StudentForm = ({ type, data, id, onSuccess }: StudentFormProps) => {
       );
       const message = response?.message ?? "Student saved successfully.";
       setSuccessMessage(message);
+
+      if (guardianMode === "new") {
+        await refreshGuardians();
+      }
 
       if (type === "create") {
         reset({
@@ -337,7 +365,8 @@ const StudentForm = ({ type, data, id, onSuccess }: StudentFormProps) => {
           existingGuardianId: undefined,
           schoolId: canSwitch ? activeSchoolId : scopeId,
         });
-        setUseExistingGuardian(false);
+        setGuardianMode("new");
+        guardianModeWasSetByUserRef.current = false;
       }
 
       await Promise.resolve(onSuccess?.(response));
@@ -516,21 +545,35 @@ const StudentForm = ({ type, data, id, onSuccess }: StudentFormProps) => {
 
       <span className="text-xs text-gray-400 font-medium">Guardian Information</span>
       <div className="flex flex-col gap-4">
-        <label className="flex items-center gap-2 text-sm text-gray-600">
-          <input
-            type="checkbox"
-            checked={useExistingGuardian}
-            onChange={handleToggleExistingGuardian}
-            className="accent-lamaPurple"
-          />
-          Use existing guardian
-        </label>
+        <div className="flex flex-wrap items-center gap-4 text-sm text-gray-600">
+          <label className="flex items-center gap-2">
+            <input
+              type="radio"
+              name="guardian-mode"
+              value="existing"
+              checked={guardianMode === "existing"}
+              onChange={() => handleGuardianModeChange("existing")}
+              className="accent-lamaPurple"
+              disabled={guardianOptions.length === 0 && !hasExistingGuardianDefault}
+            />
+            Use existing guardian
+          </label>
+          <label className="flex items-center gap-2">
+            <input
+              type="radio"
+              name="guardian-mode"
+              value="new"
+              checked={guardianMode === "new"}
+              onChange={() => handleGuardianModeChange("new")}
+              className="accent-lamaPurple"
+            />
+            Add a new guardian
+          </label>
+        </div>
 
-        {guardiansError && (
-          <p className="text-xs text-red-400">{guardiansError}</p>
-        )}
+        {guardiansError && <p className="text-xs text-red-400">{guardiansError}</p>}
 
-        {useExistingGuardian ? (
+        {guardianMode === "existing" ? (
           <div className="flex flex-col gap-4">
             <div className="flex flex-col gap-2 w-full md:w-1/2">
               <label className="text-xs text-gray-500">Existing Guardian</label>
@@ -545,7 +588,7 @@ const StudentForm = ({ type, data, id, onSuccess }: StudentFormProps) => {
                       const value = event.target.value;
                       field.onChange(value ? Number(value) : undefined);
                     }}
-                    disabled={guardiansLoading}
+                    disabled={guardiansLoading || guardianOptions.length === 0}
                   >
                     <option value="">
                       {guardiansLoading ? "Loading guardians..." : "Select guardian"}
@@ -565,6 +608,11 @@ const StudentForm = ({ type, data, id, onSuccess }: StudentFormProps) => {
                 </p>
               )}
             </div>
+            {guardianOptions.length === 0 && !guardiansLoading && (
+              <p className="text-xs text-gray-500">
+                No guardians available yet. Switch to &quot;Add a new guardian&quot; to create one.
+              </p>
+            )}
             {selectedGuardian && (
               <div className="rounded-md border border-gray-200 bg-gray-50 p-4 text-sm text-gray-600">
                 <p className="font-medium text-gray-700">{selectedGuardian.name}</p>
