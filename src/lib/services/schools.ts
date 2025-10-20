@@ -6,6 +6,41 @@ import prisma from "@/lib/prisma";
 const DEFAULT_PAGE_SIZE = 20;
 const MAX_PAGE_SIZE = 500;
 
+const FALLBACK_SCHOOLS: ReadonlyArray<School> = Object.freeze([
+  {
+    id: "school-main",
+    name: "Bishop Crowther Main Campus",
+    code: "BCM",
+    address: "1 Unity Road",
+    city: "Lagos",
+    state: "Lagos",
+    country: "Nigeria",
+    phone: "+234700000001",
+    email: "main@bishopcrowther.sch.ng",
+    principal: "Mrs. Comfort Obi",
+    established: "1986",
+    logo: null,
+    createdAt: new Date("2024-01-01T00:00:00.000Z"),
+    updatedAt: new Date("2024-01-01T00:00:00.000Z"),
+  },
+  {
+    id: "school-annex",
+    name: "Bishop Crowther Annex Campus",
+    code: "BCA",
+    address: "2 Lake View",
+    city: "Lagos",
+    state: "Lagos",
+    country: "Nigeria",
+    phone: "+234700000002",
+    email: "annex@bishopcrowther.sch.ng",
+    principal: "Mr. Vincent Iro",
+    established: "1994",
+    logo: null,
+    createdAt: new Date("2024-01-01T00:00:00.000Z"),
+    updatedAt: new Date("2024-01-01T00:00:00.000Z"),
+  },
+]);
+
 type PaginationParams = {
   page?: number;
   pageSize?: number;
@@ -71,52 +106,125 @@ export async function listSchools(
   const { search, city, state, country } = filters;
   const { page, pageSize } = sanitizePaging(filters);
 
-  const where: Prisma.SchoolWhereInput = {};
+  const runDbQuery = async () => {
+    const where: Prisma.SchoolWhereInput = {};
 
-  if (search) {
-    where.OR = [
-      { name: { contains: search, mode: "insensitive" } },
-      { code: { contains: search, mode: "insensitive" } },
-      { city: { contains: search, mode: "insensitive" } },
-      { state: { contains: search, mode: "insensitive" } },
-    ];
-  }
+    if (search) {
+      where.OR = [
+        { name: { contains: search, mode: "insensitive" } },
+        { code: { contains: search, mode: "insensitive" } },
+        { city: { contains: search, mode: "insensitive" } },
+        { state: { contains: search, mode: "insensitive" } },
+      ];
+    }
 
-  if (city) {
-    where.city = { contains: city, mode: "insensitive" };
-  }
+    if (city) {
+      where.city = { contains: city, mode: "insensitive" };
+    }
 
-  if (state) {
-    where.state = { contains: state, mode: "insensitive" };
-  }
+    if (state) {
+      where.state = { contains: state, mode: "insensitive" };
+    }
 
-  if (country) {
-    where.country = { contains: country, mode: "insensitive" };
-  }
+    if (country) {
+      where.country = { contains: country, mode: "insensitive" };
+    }
 
-  const skip = (page - 1) * pageSize;
+    const skip = (page - 1) * pageSize;
 
-  const [items, totalItems] = await Promise.all([
-    prisma.school.findMany({
-      where,
-      orderBy: { name: "asc" },
-      skip,
-      take: pageSize,
-    }),
-    prisma.school.count({ where }),
-  ]);
-
-  const totalPages = Math.max(Math.ceil(totalItems / pageSize), 1);
-
-  return {
-    items,
-    pagination: {
-      page,
-      pageSize,
-      totalItems,
-      totalPages,
-    },
+    return Promise.all([
+      prisma.school.findMany({
+        where,
+        orderBy: { name: "asc" },
+        skip,
+        take: pageSize,
+      }),
+      prisma.school.count({ where }),
+    ]);
   };
+
+  const buildFallbackResult = (): ListSchoolsResult => {
+    const normalizedSearch = search?.trim().toLowerCase();
+
+    let filtered = Array.from(FALLBACK_SCHOOLS).sort((a, b) =>
+      a.name.localeCompare(b.name),
+    );
+
+    if (normalizedSearch) {
+      filtered = filtered.filter((school) => {
+        const bucket = [school.name, school.code, school.city, school.state]
+          .filter(Boolean)
+          .map((value) => value.toLowerCase());
+        return bucket.some((value) => value.includes(normalizedSearch));
+      });
+    }
+
+    if (city) {
+      const target = city.toLowerCase();
+      filtered = filtered.filter((school) =>
+        school.city.toLowerCase().includes(target),
+      );
+    }
+
+    if (state) {
+      const target = state.toLowerCase();
+      filtered = filtered.filter((school) =>
+        school.state.toLowerCase().includes(target),
+      );
+    }
+
+    if (country) {
+      const target = country.toLowerCase();
+      filtered = filtered.filter((school) =>
+        school.country.toLowerCase().includes(target),
+      );
+    }
+
+    const totalItems = filtered.length;
+    const totalPages = Math.max(Math.ceil(totalItems / pageSize), 1);
+    const safePage = Math.min(page, totalPages);
+    const start = (safePage - 1) * pageSize;
+    const items = filtered.slice(start, start + pageSize);
+
+    return {
+      items,
+      pagination: {
+        page: totalPages === 0 ? 1 : safePage,
+        pageSize,
+        totalItems,
+        totalPages,
+      },
+    };
+  };
+
+  try {
+    const [items, totalItems] = await runDbQuery();
+
+    const totalPages = Math.max(Math.ceil(totalItems / pageSize), 1);
+
+    return {
+      items,
+      pagination: {
+        page,
+        pageSize,
+        totalItems,
+        totalPages,
+      },
+    };
+  } catch (error) {
+    const isDatabaseOffline =
+      error instanceof Prisma.PrismaClientInitializationError ||
+      (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P1001");
+
+    if (isDatabaseOffline) {
+      console.warn(
+        "[Schools service] Falling back to local seed data because the database is unavailable.",
+      );
+      return buildFallbackResult();
+    }
+
+    throw error;
+  }
 }
 
 export async function createSchool(input: CreateSchoolInput): Promise<School> {

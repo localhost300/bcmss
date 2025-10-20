@@ -8,6 +8,27 @@ import { coerceToStringId } from "./utils";
 const DEFAULT_PAGE_SIZE = 20;
 const MAX_PAGE_SIZE = 500;
 
+const FALLBACK_SESSIONS: ReadonlyArray<AcademicSession> = Object.freeze([
+  {
+    id: "2024-2025",
+    name: "2024/2025 Academic Session",
+    startDate: new Date("2024-09-01T00:00:00.000Z"),
+    endDate: new Date("2025-07-15T00:00:00.000Z"),
+    isCurrent: true,
+    createdAt: new Date("2024-09-01T00:00:00.000Z"),
+    updatedAt: new Date("2024-09-01T00:00:00.000Z"),
+  },
+  {
+    id: "2023-2024",
+    name: "2023/2024 Academic Session",
+    startDate: new Date("2023-09-01T00:00:00.000Z"),
+    endDate: new Date("2024-07-15T00:00:00.000Z"),
+    isCurrent: false,
+    createdAt: new Date("2023-09-01T00:00:00.000Z"),
+    updatedAt: new Date("2024-07-15T00:00:00.000Z"),
+  },
+]);
+
 type SaveSessionInput = {
   id?: string;
   name: string;
@@ -59,43 +80,98 @@ export async function listSessions(filters: ListSessionsFilters = {}): Promise<L
   const { page, pageSize } = sanitizePaging(filters);
   const { search, isCurrent } = filters;
 
-  const where: Prisma.AcademicSessionWhereInput = {};
+  const runDbQuery = async () => {
+    const where: Prisma.AcademicSessionWhereInput = {};
 
-  if (search && search.trim()) {
-    const query = search.trim();
-    where.OR = [
-      { id: { contains: query, mode: "insensitive" } },
-      { name: { contains: query, mode: "insensitive" } },
-    ];
-  }
+    if (search && search.trim()) {
+      const query = search.trim();
+      where.OR = [
+        { id: { contains: query, mode: "insensitive" } },
+        { name: { contains: query, mode: "insensitive" } },
+      ];
+    }
 
-  if (typeof isCurrent === "boolean") {
-    where.isCurrent = isCurrent;
-  }
+    if (typeof isCurrent === "boolean") {
+      where.isCurrent = isCurrent;
+    }
 
-  const skip = (page - 1) * pageSize;
+    const skip = (page - 1) * pageSize;
 
-  const [items, totalItems] = await Promise.all([
-    prisma.academicSession.findMany({
-      where,
-      orderBy: [{ startDate: "desc" }],
-      skip,
-      take: pageSize,
-    }),
-    prisma.academicSession.count({ where }),
-  ]);
-
-  const totalPages = Math.max(Math.ceil(totalItems / pageSize), 1);
-
-  return {
-    items,
-    pagination: {
-      page,
-      pageSize,
-      totalItems,
-      totalPages,
-    },
+    return Promise.all([
+      prisma.academicSession.findMany({
+        where,
+        orderBy: [{ startDate: "desc" }],
+        skip,
+        take: pageSize,
+      }),
+      prisma.academicSession.count({ where }),
+    ]);
   };
+
+  const buildFallbackResult = (): ListSessionsResult => {
+    const normalizedSearch = search?.trim().toLowerCase();
+
+    let filtered = Array.from(FALLBACK_SESSIONS).sort(
+      (a, b) => b.startDate.getTime() - a.startDate.getTime(),
+    );
+
+    if (normalizedSearch) {
+      filtered = filtered.filter((session) => {
+        const idMatch = session.id.toLowerCase().includes(normalizedSearch);
+        const nameMatch = session.name.toLowerCase().includes(normalizedSearch);
+        return idMatch || nameMatch;
+      });
+    }
+
+    if (typeof isCurrent === "boolean") {
+      filtered = filtered.filter((session) => session.isCurrent === isCurrent);
+    }
+
+    const totalItems = filtered.length;
+    const totalPages = Math.max(Math.ceil(totalItems / pageSize), 1);
+    const safePage = Math.min(page, totalPages);
+    const start = (safePage - 1) * pageSize;
+    const items = filtered.slice(start, start + pageSize);
+
+    return {
+      items,
+      pagination: {
+        page: totalPages === 0 ? 1 : safePage,
+        pageSize,
+        totalItems,
+        totalPages,
+      },
+    };
+  };
+
+  try {
+    const [items, totalItems] = await runDbQuery();
+
+    const totalPages = Math.max(Math.ceil(totalItems / pageSize), 1);
+
+    return {
+      items,
+      pagination: {
+        page,
+        pageSize,
+        totalItems,
+        totalPages,
+      },
+    };
+  } catch (error) {
+    const isDatabaseOffline =
+      error instanceof Prisma.PrismaClientInitializationError ||
+      (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P1001");
+
+    if (isDatabaseOffline) {
+      console.warn(
+        "[Sessions service] Falling back to local seed data because the database is unavailable.",
+      );
+      return buildFallbackResult();
+    }
+
+    throw error;
+  }
 }
 
 export async function createSession(input: SaveSessionInput): Promise<AcademicSession> {
