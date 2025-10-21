@@ -8,6 +8,7 @@ generator client {
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
+  shadowDatabaseUrl = env("SHADOW_DATABASE_URL")
 }
 
 enum Role {
@@ -43,7 +44,7 @@ model User {
   email          String          @unique
   firstName      String?
   lastName       String?
-  phone          String?  
+  phone          String?
   passwordHash   String?
   role           Role
   teacher        Teacher?
@@ -55,28 +56,29 @@ model User {
 }
 
 model School {
-  id          String                    @id @default(cuid())
-  name        String
-  code        String                    @unique
-  address     String
-  city        String
-  state       String
-  country     String
-  phone       String
-  email       String
-  principal   String
-  established String
-  logo        String?
-  teachers    Teacher[]
-  students    Student[]
-  parents     Parent[]
-  classes     SchoolClass[]
-  subjects    Subject[]
-  exams       Exam[]
-  sessions    AcademicSessionOnSchool[]
-  managers    SchoolManager[]
-  createdAt   DateTime                  @default(now())
-  updatedAt   DateTime                  @updatedAt
+  id                String                    @id @default(cuid())
+  name              String
+  code              String                    @unique
+  address           String
+  city              String
+  state             String
+  country           String
+  phone             String
+  email             String
+  principal         String
+  established       String
+  logo              String?
+  teachers          Teacher[]
+  students          Student[]
+  parents           Parent[]
+  classes           SchoolClass[]
+  subjects          Subject[]
+  exams             Exam[]
+  sessions          AcademicSessionOnSchool[]
+  managers          SchoolManager[]
+  markDistributions MarkDistribution[]
+  createdAt         DateTime                  @default(now())
+  updatedAt         DateTime                  @updatedAt
 }
 
 model SchoolManager {
@@ -151,33 +153,33 @@ model SchoolClass {
 }
 
 model Student {
-  id          Int                 @id @default(autoincrement())
-  studentCode String              @unique
-  name        String
-  email       String?
-  phone       String?
-  dateOfBirth DateTime?
-  bloodType   String?
-  guardianName String?
+  id            Int                 @id @default(autoincrement())
+  studentCode   String              @unique
+  name          String
+  email         String?
+  phone         String?
+  dateOfBirth   DateTime?
+  bloodType     String?
+  guardianName  String?
   guardianPhone String?
   guardianEmail String?
-  address     String?
-  photo       String?
-  grade       Int?
-  category    StudentCategory     @default(GENERAL)
-  schoolId    String
-  school      School              @relation(fields: [schoolId], references: [id])
-  className   String?
-  classId     Int?
-  class       SchoolClass?        @relation(fields: [classId], references: [id])
-  userId      String?             @unique
-  user        User?               @relation(fields: [userId], references: [id])
-  guardians   StudentParent[]
-  attendances StudentAttendance[]
-  examScores  ExamScore[]
-  messages    StudentMessage[]
-  createdAt   DateTime            @default(now())
-  updatedAt   DateTime            @updatedAt
+  address       String?
+  photo         String?
+  grade         Int?
+  category      StudentCategory     @default(GENERAL)
+  schoolId      String
+  school        School              @relation(fields: [schoolId], references: [id])
+  className     String?
+  classId       Int?
+  class         SchoolClass?        @relation(fields: [classId], references: [id])
+  userId        String?             @unique
+  user          User?               @relation(fields: [userId], references: [id])
+  guardians     StudentParent[]
+  attendances   StudentAttendance[]
+  examScores    ExamScore[]
+  messages      StudentMessage[]
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
 }
 
 model Parent {
@@ -237,15 +239,16 @@ model SubjectClass {
 }
 
 model AcademicSession {
-  id        String                    @id
-  name      String
-  startDate DateTime
-  endDate   DateTime
-  isCurrent Boolean                   @default(false)
-  exams     Exam[]
-  schools   AcademicSessionOnSchool[]
-  createdAt DateTime                  @default(now())
-  updatedAt DateTime                  @updatedAt
+  id                String                    @id
+  name              String
+  startDate         DateTime
+  endDate           DateTime
+  isCurrent         Boolean                   @default(false)
+  exams             Exam[]
+  schools           AcademicSessionOnSchool[]
+  createdAt         DateTime                  @default(now())
+  updatedAt         DateTime                  @updatedAt
+  markDistributions MarkDistribution[]
 }
 
 model AcademicSessionOnSchool {
@@ -296,6 +299,37 @@ model ExamScore {
   @@unique([examId, studentId])
 }
 
+model MarkDistribution {
+  id         String                      @id @default(cuid())
+  schoolId   String?
+  sessionId  String
+  term       Term
+  examType   ExamType
+  title      String
+  components MarkDistributionComponent[]
+  createdAt  DateTime                    @default(now())
+  updatedAt  DateTime                    @updatedAt
+
+  school  School?         @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  session AcademicSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@unique([schoolId, sessionId, term, examType])
+}
+
+model MarkDistributionComponent {
+  id             Int    @id @default(autoincrement())
+  distributionId String
+  componentId    String
+  label          String
+  weight         Int
+  order          Int    @default(0)
+
+  distribution MarkDistribution @relation(fields: [distributionId], references: [id], onDelete: Cascade)
+
+  @@unique([distributionId, componentId])
+  @@index([distributionId, order])
+}
+
 model StudentAttendance {
   id        Int      @id @default(autoincrement())
   studentId Int
@@ -319,7 +353,6 @@ model StudentMessage {
   student   Student  @relation(fields: [studentId], references: [id])
 }
 
-
 model StudentScoreRecord {
   id          String   @id
   studentId   Int
@@ -337,9 +370,3 @@ model StudentScoreRecord {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 }
-
-
-
-
-
-

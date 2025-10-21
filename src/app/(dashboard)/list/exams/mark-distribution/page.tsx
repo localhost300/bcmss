@@ -7,9 +7,9 @@ import FormModal from "@/components/FormModal";
 import Table from "@/components/Table";
 import { useAuth } from "@/contexts/AuthContext";
 import { useSessionScope, useTermScope } from "@/contexts/SessionContext";
-import { getExamDistributions } from "@/lib/markDistributions";
 import { buildExamTypeOptions, getExamTypeLabel } from "@/lib/exams";
 import type { ExamMarkDistribution, ExamMarkComponent } from "@/lib/data";
+import { listMarkDistributions } from "@/lib/services/markDistributions";
 
 type DistributionType = ExamMarkDistribution["examType"];
 
@@ -28,8 +28,31 @@ const MarkDistributionPage = () => {
   const termScope = useTermScope();
 
   const [selectedExamType, setSelectedExamType] = useState<string>("");
-  const [distributions, setDistributions] =
-    useState<ExamMarkDistribution[]>(() => getExamDistributions());
+  const [distributions, setDistributions] = useState<ExamMarkDistribution[]>([]);
+  const [loadingDistributions, setLoadingDistributions] = useState(true);
+  const [distributionError, setDistributionError] = useState<string | null>(null);
+
+  const loadDistributions = useCallback(async () => {
+    setLoadingDistributions(true);
+    setDistributionError(null);
+    try {
+      const data = await listMarkDistributions({
+        sessionId: sessionScope ?? undefined,
+        term: termScope ?? undefined,
+      });
+      setDistributions(data);
+    } catch (error) {
+      console.error("[MarkDistributionPage] Failed to load mark distributions", error);
+      setDistributions([]);
+      setDistributionError("Unable to load mark distributions. Please try again.");
+    } finally {
+      setLoadingDistributions(false);
+    }
+  }, [sessionScope, termScope]);
+
+  useEffect(() => {
+    void loadDistributions();
+  }, [loadDistributions]);
 
   const filteredDistributions = useMemo(
     () =>
@@ -98,9 +121,9 @@ const MarkDistributionPage = () => {
     [componentRows],
   );
 
-  const handleDistributionSave = useCallback(() => {
-    setDistributions(getExamDistributions());
-  }, []);
+  const handleDistributionSave = useCallback(async () => {
+    await loadDistributions();
+  }, [loadDistributions]);
 
   const renderRow = useCallback(
     (component: ExamMarkComponent) => (
@@ -137,12 +160,23 @@ const MarkDistributionPage = () => {
     "final"
   ) as DistributionType;
 
+  const templateForResolvedType = useMemo(
+    () =>
+      distributions.find(
+        (distribution) =>
+          distribution.examType === resolvedExamType &&
+          (sessionScope ? distribution.sessionId === sessionScope : true) &&
+          (termScope ? distribution.term === termScope : true),
+      ) ?? null,
+    [distributions, resolvedExamType, sessionScope, termScope],
+  );
+
   const modalData: Partial<ExamMarkDistribution> =
     activeDistribution ?? {
       examType: resolvedExamType,
       sessionId: sessionScope ?? "",
       term: termScope ?? "First Term",
-      components: [],
+      components: templateForResolvedType?.components ?? [],
       title: `${termScope ?? "Term"} ${getExamTypeLabel(resolvedExamType)}`,
     };
 
@@ -154,7 +188,7 @@ const MarkDistributionPage = () => {
             Mark Distribution
           </h1>
           <p className="text-xs text-gray-500">
-            Session {sessionScope || "—"} | Term {termScope || "—"}
+            Session {sessionScope ?? "—"} | Term {termScope ?? "—"}
           </p>
         </div>
 
@@ -185,7 +219,11 @@ const MarkDistributionPage = () => {
         </div>
       </div>
 
-      {componentRows.length > 0 ? (
+      {loadingDistributions ? (
+        <div className="py-10 text-center text-sm text-gray-500">Loading mark distributions…</div>
+      ) : distributionError ? (
+        <div className="py-10 text-center text-sm text-red-500">{distributionError}</div>
+      ) : componentRows.length > 0 ? (
         <>
           <Table columns={columns} renderRow={renderRow} data={componentRows} />
           <div className="mt-4 text-sm text-gray-600">

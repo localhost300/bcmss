@@ -17,7 +17,7 @@ import {
   type GradeSummary,
 } from "@/lib/grades";
 import type { ExamMarkDistribution } from "@/lib/data";
-import { getExamDistributions } from "@/lib/markDistributions";
+import { listMarkDistributions } from "@/lib/services/markDistributions";
 import { getJSON, postJSON } from "@/lib/utils/api";
 
 export type Term = "First Term" | "Second Term" | "Third Term";
@@ -140,6 +140,8 @@ type ResultsContextValue = {
     decision: "auto" | "promote" | "hold",
   ) => void;
   finalizePromotion: (filters: ClassFilters) => PromotionCandidate[];
+  markDistributionLoading: boolean;
+  markDistributionError: string | null;
 };
 
 const ResultsContext = createContext<ResultsContextValue | undefined>(
@@ -235,30 +237,6 @@ const mapScoreRecord = (raw: unknown): ScoreRecord => {
 const DEFAULT_MIDTERM_MAX = 50;
 const DEFAULT_FINAL_MAX = 100;
 
-const findDistribution = (
-  examType: "midterm" | "final",
-  sessionId: string,
-  term: string,
-): ExamMarkDistribution | undefined => {
-  const pool = getExamDistributions();
-  return (
-    pool.find(
-      (distribution) =>
-        distribution.examType === examType &&
-        distribution.sessionId === sessionId &&
-        distribution.term === term,
-    ) ??
-    pool.find(
-      (distribution) =>
-        distribution.examType === examType && distribution.sessionId === sessionId,
-    ) ??
-    pool.find(
-      (distribution) => distribution.examType === examType && distribution.term === term,
-    ) ??
-    pool.find((distribution) => distribution.examType === examType)
-  );
-};
-
 const buildRecordKey = (record: ScoreRecord) =>
   [
     record.sessionId,
@@ -279,11 +257,35 @@ const clampScore = (value: number, max: number | null | undefined) => {
   return Math.max(0, Math.min(value, max));
 };
 
-const alignRecordsWithMarkDistributions = (records: ScoreRecord[]): ScoreRecord[] => {
+const alignRecordsWithMarkDistributions = (
+  records: ScoreRecord[],
+  distributions: ExamMarkDistribution[],
+): ScoreRecord[] => {
   if (!records.length) return records;
 
   const midtermTotals = new Map<string, { score: number; max: number }>();
   const alignedByKey = new Map<string, ScoreRecord>();
+  const pool = distributions;
+
+  const findDistribution = (
+    examType: "midterm" | "final",
+    sessionId: string,
+    term: string,
+  ): ExamMarkDistribution | undefined =>
+    pool.find(
+      (distribution) =>
+        distribution.examType === examType &&
+        distribution.sessionId === sessionId &&
+        distribution.term === term,
+    ) ??
+    pool.find(
+      (distribution) =>
+        distribution.examType === examType && distribution.sessionId === sessionId,
+    ) ??
+    pool.find(
+      (distribution) => distribution.examType === examType && distribution.term === term,
+    ) ??
+    pool.find((distribution) => distribution.examType === examType);
 
   const normaliseRecord = (
     record: ScoreRecord,
@@ -413,6 +415,53 @@ export const ResultsProvider = ({ children }: ResultsProviderProps) => {
 
   const term = termScope ?? "First Term";
 
+  const [markDistributions, setMarkDistributions] = useState<ExamMarkDistribution[]>([]);
+  const [markDistributionLoading, setMarkDistributionLoading] = useState(false);
+  const [markDistributionError, setMarkDistributionError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let ignore = false;
+
+    const loadMarkDistributions = async () => {
+      setMarkDistributionLoading(true);
+      setMarkDistributionError(null);
+      try {
+        const data = await listMarkDistributions({
+          schoolId: schoolScope ?? undefined,
+          sessionId: sessionScope ?? undefined,
+          term: termScope ?? undefined,
+        });
+        if (!ignore) {
+          setMarkDistributions(data);
+        }
+      } catch (error) {
+        console.error("[ResultsContext] Failed to load mark distributions", error);
+        if (!ignore) {
+          setMarkDistributions([]);
+          setMarkDistributionError("Unable to load mark distributions.");
+        }
+      } finally {
+        if (!ignore) {
+          setMarkDistributionLoading(false);
+        }
+      }
+    };
+
+    void loadMarkDistributions();
+    return () => {
+      ignore = true;
+    };
+  }, [schoolScope, sessionScope, termScope]);
+
+  useEffect(() => {
+    setClassRecords((prev) => {
+      const next: Record<string, ScoreRecord[]> = {};
+      Object.entries(prev).forEach(([key, records]) => {
+        next[key] = alignRecordsWithMarkDistributions(records, markDistributions);
+      });
+      return next;
+    });
+  }, [markDistributions]);
   const [classOptions, setClassOptions] = useState<ClassOption[]>([]);
   const [classOptionsLoading, setClassOptionsLoading] = useState(false);
   const [classOptionsError, setClassOptionsError] = useState<string | null>(
@@ -481,27 +530,6 @@ export const ResultsProvider = ({ children }: ResultsProviderProps) => {
     };
   }, [schoolScope]);
 
-  useEffect(() => {
-    if (typeof window === "undefined") {
-      return;
-    }
-
-    const handleDistributionUpdate = () => {
-      setClassRecords((prev) => {
-        const next: Record<string, ScoreRecord[]> = {};
-        Object.entries(prev).forEach(([entryKey, records]) => {
-          next[entryKey] = alignRecordsWithMarkDistributions(records);
-        });
-        return next;
-      });
-    };
-
-    window.addEventListener("mark-distributions-updated", handleDistributionUpdate);
-    return () => {
-      window.removeEventListener("mark-distributions-updated", handleDistributionUpdate);
-    };
-  }, []);
-
   const loadClassData = useCallback(
     async ({ classId, term, sessionId }: ClassFilters) => {
       if (!classId || !sessionId) return;
@@ -524,7 +552,7 @@ export const ResultsProvider = ({ children }: ResultsProviderProps) => {
         const rawRecords = Array.isArray(response?.data)
           ? (response!.data as unknown[]).map(mapScoreRecord)
           : [];
-        const records = alignRecordsWithMarkDistributions(rawRecords);
+        const records = alignRecordsWithMarkDistributions(rawRecords, markDistributions);
 
         const examTypeSet = new Set<"midterm" | "final">();
         try {
@@ -1013,6 +1041,8 @@ export const ResultsProvider = ({ children }: ResultsProviderProps) => {
       getPromotionCandidates,
       setPromotionDecision,
       finalizePromotion,
+      markDistributionLoading,
+      markDistributionError,
     }),
     [
       classOptions,
@@ -1035,6 +1065,8 @@ export const ResultsProvider = ({ children }: ResultsProviderProps) => {
       getPromotionCandidates,
       setPromotionDecision,
       finalizePromotion,
+      markDistributionLoading,
+      markDistributionError,
     ],
   );
 

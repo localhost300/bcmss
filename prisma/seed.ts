@@ -2,6 +2,8 @@ import { PrismaClient, ExamType, StudentCategory, Term } from "@prisma/client";
 const prisma = new PrismaClient();
 
 async function resetDatabase() {
+  await prisma.markDistributionComponent.deleteMany();
+  await prisma.markDistribution.deleteMany();
   await prisma.studentScoreRecord.deleteMany();
   await prisma.studentAttendance.deleteMany();
   await prisma.studentMessage.deleteMany();
@@ -70,6 +72,109 @@ async function main() {
   await prisma.academicSessionOnSchool.createMany({
     data: schools.map((school) => ({ sessionId: session.id, schoolId: school.id })),
   });
+
+  const distributionTemplates = [
+    {
+      sessionId: session.id,
+      term: Term.FIRST,
+      examType: ExamType.MIDTERM,
+      title: "Midterm Assessment – First Term",
+      components: [
+        { componentId: "ca1", label: "CA1", weight: 20, order: 0 },
+        { componentId: "quiz", label: "Quiz", weight: 10, order: 1 },
+        { componentId: "assignment", label: "Assignment", weight: 10, order: 2 },
+        { componentId: "participation", label: "Class Participation", weight: 10, order: 3 },
+      ],
+    },
+    {
+      sessionId: session.id,
+      term: Term.SECOND,
+      examType: ExamType.MIDTERM,
+      title: "Midterm Assessment – Second Term",
+      components: [
+        { componentId: "ca1", label: "CA1", weight: 20, order: 0 },
+        { componentId: "quiz", label: "Quiz", weight: 10, order: 1 },
+        { componentId: "assignment", label: "Assignment", weight: 10, order: 2 },
+        { componentId: "participation", label: "Class Participation", weight: 10, order: 3 },
+      ],
+    },
+    {
+      sessionId: session.id,
+      term: Term.THIRD,
+      examType: ExamType.MIDTERM,
+      title: "Midterm Assessment – Third Term",
+      components: [
+        { componentId: "ca1", label: "CA1", weight: 20, order: 0 },
+        { componentId: "quiz", label: "Quiz", weight: 10, order: 1 },
+        { componentId: "assignment", label: "Assignment", weight: 10, order: 2 },
+        { componentId: "participation", label: "Class Participation", weight: 10, order: 3 },
+      ],
+    },
+    {
+      sessionId: session.id,
+      term: Term.FIRST,
+      examType: ExamType.FINAL,
+      title: "Final Examination – First Term",
+      components: [
+        { componentId: "midtermCarry", label: "Midterm Aggregate (÷2.5)", weight: 20, order: 0 },
+        { componentId: "ca2", label: "CA2", weight: 20, order: 1 },
+        { componentId: "exam", label: "Examination", weight: 60, order: 2 },
+      ],
+    },
+    {
+      sessionId: session.id,
+      term: Term.SECOND,
+      examType: ExamType.FINAL,
+      title: "Final Examination – Second Term",
+      components: [
+        { componentId: "midtermCarry", label: "Midterm Aggregate (÷2.5)", weight: 20, order: 0 },
+        { componentId: "ca2", label: "CA2", weight: 20, order: 1 },
+        { componentId: "exam", label: "Examination", weight: 60, order: 2 },
+      ],
+    },
+    {
+      sessionId: session.id,
+      term: Term.THIRD,
+      examType: ExamType.FINAL,
+      title: "Final Examination – Third Term",
+      components: [
+        { componentId: "midtermCarry", label: "Midterm Aggregate (÷2.5)", weight: 20, order: 0 },
+        { componentId: "ca2", label: "CA2", weight: 20, order: 1 },
+        { componentId: "exam", label: "Examination", weight: 60, order: 2 },
+      ],
+    },
+  ];
+
+  for (const template of distributionTemplates) {
+    await prisma.markDistribution.upsert({
+      where: {
+        schoolId_sessionId_term_examType: {
+          schoolId: null,
+          sessionId: template.sessionId,
+          term: template.term,
+          examType: template.examType,
+        },
+      },
+      update: {
+        title: template.title,
+        components: {
+          deleteMany: {},
+          create: template.components,
+        },
+      },
+      create: {
+        schoolId: null,
+        sessionId: template.sessionId,
+        term: template.term,
+        examType: template.examType,
+        title: template.title,
+        components: {
+          create: template.components,
+        },
+      },
+    });
+  }
+
   const subjects = await Promise.all([
     prisma.subject.create({
       data: {

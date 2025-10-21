@@ -1,10 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { getExamDistributions, saveExamDistribution } from "@/lib/markDistributions";
 import type { ExamMarkComponent, ExamMarkDistribution } from "@/lib/data";
 import { buildExamTypeOptions, getExamTypeLabel } from "@/lib/exams";
+import {
+  listMarkDistributions,
+  upsertMarkDistribution,
+} from "@/lib/services/markDistributions";
 
 type DistributionType = ExamMarkDistribution["examType"];
 
@@ -27,27 +30,52 @@ const cloneComponents = (components: ExamMarkComponent[] | undefined): EditableC
     weight: Number(component.weight) || 0,
   }));
 
-const findTemplate = (
-  examType: DistributionType,
-  sessionId?: string,
-  term?: string,
-): ExamMarkComponent[] | undefined =>
-  getExamDistributions().find(
-    (distribution) =>
-      distribution.examType === examType &&
-      (sessionId ? distribution.sessionId === sessionId : true) &&
-      (term ? distribution.term === term : true),
-  )?.components;
-
 const MarkDistributionForm = ({ type, data, onSuccess }: MarkDistributionFormProps) => {
+  const [catalogue, setCatalogue] = useState<ExamMarkDistribution[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let ignore = false;
+
+    const fetchCatalogue = async () => {
+      setLoading(true);
+      setLoadError(null);
+      try {
+        const distributions = await listMarkDistributions({
+          sessionId: data?.sessionId,
+          term: data?.term as "First Term" | "Second Term" | "Third Term" | undefined,
+        });
+        if (!ignore) {
+          setCatalogue(distributions);
+        }
+      } catch (error) {
+        console.error("[MarkDistributionForm] Failed to load templates", error);
+        if (!ignore) {
+          setCatalogue([]);
+          setLoadError("Unable to load mark distribution templates.");
+        }
+      } finally {
+        if (!ignore) {
+          setLoading(false);
+        }
+      }
+    };
+
+    void fetchCatalogue();
+    return () => {
+      ignore = true;
+    };
+  }, [data?.sessionId, data?.term]);
+
   const examTypeOptions = useMemo(() => {
-    const distributions = getExamDistributions().filter((distribution) => {
+    const scoped = catalogue.filter((distribution) => {
       const matchesSession = data?.sessionId ? distribution.sessionId === data.sessionId : true;
       const matchesTerm = data?.term ? distribution.term === data.term : true;
       return matchesSession && matchesTerm;
     });
 
-    const source = distributions.length > 0 ? distributions : getExamDistributions();
+    const source = scoped.length > 0 ? scoped : catalogue;
     const types: DistributionType[] = source.map((distribution) => distribution.examType);
 
     if (isDistributionType(data?.examType) && !types.includes(data.examType)) {
@@ -59,7 +87,7 @@ const MarkDistributionForm = ({ type, data, onSuccess }: MarkDistributionFormPro
     }
 
     return buildExamTypeOptions(types);
-  }, [data?.examType, data?.sessionId, data?.term]);
+  }, [catalogue, data?.examType, data?.sessionId, data?.term]);
 
   const initialExamType = useMemo(() => {
     const preferred = isDistributionType(data?.examType) ? data.examType : null;
@@ -78,26 +106,42 @@ const MarkDistributionForm = ({ type, data, onSuccess }: MarkDistributionFormPro
     setExamType(initialExamType);
   }, [initialExamType]);
 
+  const findTemplate = useCallback(
+    (targetExamType: DistributionType) =>
+      catalogue.find(
+        (distribution) =>
+          distribution.examType === targetExamType &&
+          (data?.sessionId ? distribution.sessionId === data.sessionId : true) &&
+          (data?.term ? distribution.term === data.term : true),
+      ) ??
+      catalogue.find((distribution) => distribution.examType === targetExamType) ??
+      null,
+    [catalogue, data?.sessionId, data?.term],
+  );
+
   const [components, setComponents] = useState<EditableComponent[]>(() => {
-    const base =
-      data?.components && (data.examType as DistributionType | undefined) === initialExamType
-        ? data.components
-        : findTemplate(initialExamType, data?.sessionId, data?.term);
-    return cloneComponents(base);
+    if (data?.components && isDistributionType(data.examType) && data.examType === initialExamType) {
+      return cloneComponents(data.components);
+    }
+    const template = findTemplate(initialExamType);
+    return cloneComponents(template?.components);
   });
-  const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState<string | null>(null);
 
   useEffect(() => {
     if (data?.components && (data.examType as DistributionType | undefined) === examType) {
       setComponents(cloneComponents(data.components));
       return;
     }
-    const template = findTemplate(examType, data?.sessionId, data?.term);
+
+    const template = findTemplate(examType);
     if (template) {
-      setComponents(cloneComponents(template));
+      setComponents(cloneComponents(template.components));
     }
-  }, [examType, data?.components, data?.examType, data?.sessionId, data?.term]);
+  }, [data?.components, data?.examType, examType, findTemplate]);
+
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
 
   const totalWeight = useMemo(
     () => components.reduce((sum, component) => sum + component.weight, 0),
@@ -112,9 +156,6 @@ const MarkDistributionForm = ({ type, data, onSuccess }: MarkDistributionFormPro
     );
   };
 
-  const title =
-    data?.title ?? `Mark Distribution (${getExamTypeLabel(examType)})`;
-
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setError(null);
@@ -125,26 +166,49 @@ const MarkDistributionForm = ({ type, data, onSuccess }: MarkDistributionFormPro
       return;
     }
 
-    const payload: ExamMarkDistribution = {
-      id:
-        typeof data?.id === "string"
-          ? data.id
-          : `${data?.sessionId ?? "session"}-${data?.term ?? "term"}-${examType}`,
-      title,
-      sessionId: data?.sessionId ?? "",
-      term: data?.term ?? "First Term",
-      examType,
-      components: components.map((component) => ({
-        id: component.id,
-        label: component.label,
-        weight: component.weight,
-      })),
-    };
+    if (!data?.sessionId) {
+      setError("Select a session before saving.");
+      return;
+    }
 
-    saveExamDistribution(payload);
-    setSuccess("Mark distribution saved.");
-    await Promise.resolve(onSuccess?.(payload));
+    setSaving(true);
+    try {
+      const payload: ExamMarkDistribution = {
+        id:
+          typeof data?.id === "string"
+            ? data.id
+            : `${data?.sessionId}-${data?.term ?? "term"}-${examType}`,
+        title: data?.title ?? `Mark Distribution (${getExamTypeLabel(examType)})`,
+        sessionId: data.sessionId,
+        term: (data?.term ?? "First Term") as ExamMarkDistribution["term"],
+        examType,
+        components: components.map((component, index) => ({
+          id: component.id,
+          label: component.label,
+          weight: component.weight,
+          order: index,
+        })),
+      };
+
+      const saved = await upsertMarkDistribution(payload);
+
+      setSuccess("Mark distribution saved.");
+      await Promise.resolve(onSuccess?.(saved));
+    } catch (saveError) {
+      console.error("[MarkDistributionForm] Failed to save distribution", saveError);
+      setError(saveError instanceof Error ? saveError.message : "Failed to save mark distribution.");
+    } finally {
+      setSaving(false);
+    }
   };
+
+  if (loading) {
+    return <div className="text-sm text-gray-500">Loading mark distribution templates...</div>;
+  }
+
+  if (loadError) {
+    return <div className="text-sm text-red-500">{loadError}</div>;
+  }
 
   return (
     <form className="flex flex-col gap-6" onSubmit={handleSubmit}>
@@ -219,16 +283,12 @@ const MarkDistributionForm = ({ type, data, onSuccess }: MarkDistributionFormPro
       <button
         type="submit"
         className="rounded-md bg-blue-500 p-2 text-sm font-medium text-white hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:ring-offset-1"
+        disabled={saving}
       >
-        {type === "create" ? "Create distribution" : "Save changes"}
+        {saving ? "Saving..." : type === "create" ? "Create distribution" : "Save changes"}
       </button>
     </form>
   );
 };
 
 export default MarkDistributionForm;
-
-
-
-
-
