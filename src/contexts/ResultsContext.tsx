@@ -7,6 +7,7 @@ import React, {
   useEffect,
   useMemo,
   useState,
+  useRef,
 } from "react";
 
 import { useSchoolScope } from "@/contexts/SchoolContext";
@@ -478,6 +479,7 @@ export const ResultsProvider = ({ children }: ResultsProviderProps) => {
   const [classExamTypes, setClassExamTypes] = useState<
     Record<string, Array<"midterm" | "final">>
   >({});
+  const subjectAssignmentsRef = useRef<Record<string, string[]>>({});
   const [subjectsCache, setSubjectsCache] = useState<Record<string, string[]>>(
     {},
   );
@@ -594,6 +596,41 @@ export const ResultsProvider = ({ children }: ResultsProviderProps) => {
 
         setClassExamTypes((prev) => ({ ...prev, [key]: orderedExamTypes }));
 
+        let fallbackSubjects = subjectAssignmentsRef.current[String(classId)] ?? [];
+        if (!fallbackSubjects.length) {
+          try {
+            const subjectParams = new URLSearchParams();
+            subjectParams.set("page", "1");
+            subjectParams.set("pageSize", "200");
+            if (schoolScope) {
+              subjectParams.set("schoolId", schoolScope);
+            }
+            const subjectResponse = await getJSON<{
+              items?: Array<{ name?: unknown; classes?: Array<{ id?: unknown }> }>;
+            }>(`/api/subjects?${subjectParams.toString()}`);
+            const subjectItems = subjectResponse?.items ?? [];
+            fallbackSubjects = subjectItems
+              .filter(
+                (subject) =>
+                  Array.isArray(subject.classes) &&
+                  subject.classes.some((klass) => {
+                    const klassId = klass.id as string | number | undefined;
+                    return String(klassId ?? "") === String(classId);
+                  }),
+              )
+              .map((subject) => {
+                const rawName = subject.name;
+                return typeof rawName === "string" ? rawName.trim() : "";
+              })
+              .filter((name) => name.length > 0)
+              .sort((a, b) => a.localeCompare(b));
+            subjectAssignmentsRef.current[String(classId)] = fallbackSubjects;
+          } catch (subjectError) {
+            console.error("[ResultsContext] Unable to load class subject catalogue", subjectError);
+            fallbackSubjects = [];
+          }
+        }
+
         setClassRecords((prev) => ({ ...prev, [key]: records }));
 
         setSubjectsCache((prev) => {
@@ -615,6 +652,20 @@ export const ResultsProvider = ({ children }: ResultsProviderProps) => {
             list.add(record.subject);
             next[subjectKey] = Array.from(list).sort();
           });
+
+          if (orderedExamTypes.length) {
+            orderedExamTypes.forEach((type) => {
+              const subjectKey = buildSubjectKey({
+                classId,
+                examType: type,
+                term,
+                sessionId,
+              });
+              const list = new Set(next[subjectKey] ?? []);
+              fallbackSubjects.forEach((subject) => list.add(subject));
+              next[subjectKey] = Array.from(list).sort();
+            });
+          }
 
           return next;
         });
@@ -640,7 +691,7 @@ export const ResultsProvider = ({ children }: ResultsProviderProps) => {
         setClassLoading((prev) => ({ ...prev, [key]: false }));
       }
     },
-    [classLoading],
+    [classLoading, markDistributions, schoolScope],
   );
 
   const isClassLoading = useCallback(

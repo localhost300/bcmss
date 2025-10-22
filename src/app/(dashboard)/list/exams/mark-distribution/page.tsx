@@ -140,20 +140,6 @@ const MarkDistributionPage = () => {
     [],
   );
 
-  if (authLoading) {
-    return (
-      <div className="bg-white p-6 rounded-md flex-1 m-4 mt-0 text-sm text-gray-500">
-        Loading user profile…
-      </div>
-    );
-  }
-
-  if (user?.role !== "admin") {
-    return (
-      <AccessRestricted message="Only administrators can manage mark distribution." />
-    );
-  }
-
   const resolvedExamType = (
     activeExamType ??
     (examTypeOptions[0]?.value as DistributionType | undefined) ??
@@ -170,6 +156,20 @@ const MarkDistributionPage = () => {
       ) ?? null,
     [distributions, resolvedExamType, sessionScope, termScope],
   );
+
+  if (authLoading) {
+    return (
+      <div className="bg-white p-6 rounded-md flex-1 m-4 mt-0 text-sm text-gray-500">
+        Loading user profile…
+      </div>
+    );
+  }
+
+  if (user?.role !== "admin") {
+    return (
+      <AccessRestricted message="Only administrators can manage mark distribution." />
+    );
+  }
 
   const modalData: Partial<ExamMarkDistribution> =
     activeDistribution ?? {

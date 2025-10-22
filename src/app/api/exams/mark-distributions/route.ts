@@ -78,12 +78,30 @@ const mapDistribution = (
 
 export async function GET(request: NextRequest) {
   try {
-    const params = listQuery.parse(Object.fromEntries(request.nextUrl.searchParams));
+    const decodedParams = Object.fromEntries(
+      Array.from(request.nextUrl.searchParams.entries()).map(([key, value]) => [
+        key,
+        decodeURIComponent(value.replace(/\+/g, " ")),
+      ]),
+    );
+    const params = listQuery.parse(decodedParams);
     const where: Record<string, unknown> = {};
     if (params.sessionId) where.sessionId = params.sessionId;
     if (params.schoolId) where.schoolId = params.schoolId;
-    if (params.term) where.term = termLabelToEnum[params.term];
-    if (params.examType) where.examType = examTypeLabelToEnum[params.examType];
+    if (params.term) {
+      const termEnum = termLabelToEnum[params.term];
+      if (!termEnum) {
+        return NextResponse.json({ message: "Invalid term." }, { status: 400 });
+      }
+      where.term = termEnum;
+    }
+    if (params.examType) {
+      const examTypeEnum = examTypeLabelToEnum[params.examType];
+      if (!examTypeEnum) {
+        return NextResponse.json({ message: "Invalid exam type." }, { status: 400 });
+      }
+      where.examType = examTypeEnum;
+    }
 
     const distributions = await prisma.markDistribution.findMany({
       where,
@@ -102,6 +120,9 @@ export async function GET(request: NextRequest) {
     });
   } catch (error) {
     console.error("[MarkDistributions] GET failed", error);
+    if (error instanceof z.ZodError) {
+      return NextResponse.json({ message: "Invalid query.", issues: error.issues }, { status: 400 });
+    }
     return NextResponse.json({ message: "Unable to load mark distributions." }, { status: 500 });
   }
 }

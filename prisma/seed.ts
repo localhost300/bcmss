@@ -73,12 +73,19 @@ async function main() {
     data: schools.map((school) => ({ sessionId: session.id, schoolId: school.id })),
   });
 
-  const distributionTemplates = [
+  const distributionTemplates: Array<{
+    sessionId: string;
+    term: Term;
+    examType: ExamType;
+    title: string;
+    components: Array<{ componentId: string; label: string; weight: number; order: number }>;
+    schoolId?: string | null;
+  }> = [
     {
       sessionId: session.id,
       term: Term.FIRST,
       examType: ExamType.MIDTERM,
-      title: "Midterm Assessment – First Term",
+      title: "Midterm Assessment - First Term",
       components: [
         { componentId: "ca1", label: "CA1", weight: 20, order: 0 },
         { componentId: "quiz", label: "Quiz", weight: 10, order: 1 },
@@ -90,7 +97,7 @@ async function main() {
       sessionId: session.id,
       term: Term.SECOND,
       examType: ExamType.MIDTERM,
-      title: "Midterm Assessment – Second Term",
+      title: "Midterm Assessment - Second Term",
       components: [
         { componentId: "ca1", label: "CA1", weight: 20, order: 0 },
         { componentId: "quiz", label: "Quiz", weight: 10, order: 1 },
@@ -102,7 +109,7 @@ async function main() {
       sessionId: session.id,
       term: Term.THIRD,
       examType: ExamType.MIDTERM,
-      title: "Midterm Assessment – Third Term",
+      title: "Midterm Assessment - Third Term",
       components: [
         { componentId: "ca1", label: "CA1", weight: 20, order: 0 },
         { componentId: "quiz", label: "Quiz", weight: 10, order: 1 },
@@ -114,9 +121,9 @@ async function main() {
       sessionId: session.id,
       term: Term.FIRST,
       examType: ExamType.FINAL,
-      title: "Final Examination – First Term",
+      title: "Final Examination - First Term",
       components: [
-        { componentId: "midtermCarry", label: "Midterm Aggregate (÷2.5)", weight: 20, order: 0 },
+        { componentId: "midtermCarry", label: "Midterm Aggregate (x2.5)", weight: 20, order: 0 },
         { componentId: "ca2", label: "CA2", weight: 20, order: 1 },
         { componentId: "exam", label: "Examination", weight: 60, order: 2 },
       ],
@@ -125,9 +132,9 @@ async function main() {
       sessionId: session.id,
       term: Term.SECOND,
       examType: ExamType.FINAL,
-      title: "Final Examination – Second Term",
+      title: "Final Examination - Second Term",
       components: [
-        { componentId: "midtermCarry", label: "Midterm Aggregate (÷2.5)", weight: 20, order: 0 },
+        { componentId: "midtermCarry", label: "Midterm Aggregate (x2.5)", weight: 20, order: 0 },
         { componentId: "ca2", label: "CA2", weight: 20, order: 1 },
         { componentId: "exam", label: "Examination", weight: 60, order: 2 },
       ],
@@ -136,9 +143,9 @@ async function main() {
       sessionId: session.id,
       term: Term.THIRD,
       examType: ExamType.FINAL,
-      title: "Final Examination – Third Term",
+      title: "Final Examination - Third Term",
       components: [
-        { componentId: "midtermCarry", label: "Midterm Aggregate (÷2.5)", weight: 20, order: 0 },
+        { componentId: "midtermCarry", label: "Midterm Aggregate (x2.5)", weight: 20, order: 0 },
         { componentId: "ca2", label: "CA2", weight: 20, order: 1 },
         { componentId: "exam", label: "Examination", weight: 60, order: 2 },
       ],
@@ -146,16 +153,14 @@ async function main() {
   ];
 
   for (const template of distributionTemplates) {
+    const templateId = `${template.sessionId}-${template.term}-${template.examType}`;
+    const templateSchoolId = template.schoolId ?? null;
     await prisma.markDistribution.upsert({
       where: {
-        schoolId_sessionId_term_examType: {
-          schoolId: null,
-          sessionId: template.sessionId,
-          term: template.term,
-          examType: template.examType,
-        },
+        id: templateId,
       },
       update: {
+        schoolId: templateSchoolId,
         title: template.title,
         components: {
           deleteMany: {},
@@ -163,7 +168,8 @@ async function main() {
         },
       },
       create: {
-        schoolId: null,
+        id: templateId,
+        schoolId: templateSchoolId,
         sessionId: template.sessionId,
         term: template.term,
         examType: template.examType,
@@ -495,3 +501,4 @@ main()
   .finally(async () => {
     await prisma.$disconnect();
   });
+
