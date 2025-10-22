@@ -534,11 +534,23 @@ export const ResultsProvider = ({ children }: ResultsProviderProps) => {
 
   const loadClassData = useCallback(
     async ({ classId, term, sessionId }: ClassFilters) => {
-      if (!classId || !sessionId) return;
+      if (!classId || !sessionId) {
+        return;
+      }
       const key = buildClassKey({ classId, term, sessionId });
-      if (classLoading[key]) return;
 
-      setClassLoading((prev) => ({ ...prev, [key]: true }));
+      let shouldSkip = false;
+      setClassLoading((prev) => {
+        if (prev[key]) {
+          shouldSkip = true;
+          return prev;
+        }
+        return { ...prev, [key]: true };
+      });
+      if (shouldSkip) {
+        return;
+      }
+
       setClassErrors((prev) => ({ ...prev, [key]: null }));
 
       try {
@@ -547,13 +559,25 @@ export const ResultsProvider = ({ children }: ResultsProviderProps) => {
         params.set("term", term);
         params.set("sessionId", sessionId);
 
-        const response = await getJSON<{ data?: unknown[] }>(
-          `/api/results/scores?${params.toString()}`,
-        );
+        const response = await getJSON<unknown>(`/api/results/scores?${params.toString()}`);
 
-        const rawRecords = Array.isArray(response?.data)
-          ? (response!.data as unknown[]).map(mapScoreRecord)
-          : [];
+        const extractRecords = (body: unknown): unknown[] => {
+          if (Array.isArray(body)) {
+            return body;
+          }
+          if (body && typeof body === "object") {
+            const container = body as { data?: unknown; items?: unknown };
+            if (Array.isArray(container.data)) {
+              return container.data as unknown[];
+            }
+            if (Array.isArray(container.items)) {
+              return container.items as unknown[];
+            }
+          }
+          return [];
+        };
+
+        const rawRecords = extractRecords(response).map(mapScoreRecord);
         const records = alignRecordsWithMarkDistributions(rawRecords, markDistributions);
 
         const examTypeSet = new Set<"midterm" | "final">();
@@ -691,7 +715,7 @@ export const ResultsProvider = ({ children }: ResultsProviderProps) => {
         setClassLoading((prev) => ({ ...prev, [key]: false }));
       }
     },
-    [classLoading, markDistributions, schoolScope],
+    [markDistributions, schoolScope],
   );
 
   const isClassLoading = useCallback(
