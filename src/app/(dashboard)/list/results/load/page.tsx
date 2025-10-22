@@ -25,6 +25,7 @@ const LoadScoresPage = () => {
     classOptionsError,
     loadClassData,
     isClassLoading,
+    isClassLoaded,
     getClassError,
     getSubjectsForClass,
     getScoreSheets,
@@ -151,7 +152,8 @@ const LoadScoresPage = () => {
   }
 
   const loadingClasses = selectedClass
-    ? isClassLoading({ classId: selectedClass, term, sessionId })
+    ? isClassLoading({ classId: selectedClass, term, sessionId }) &&
+      !isClassLoaded({ classId: selectedClass, term, sessionId })
     : false;
 
   return (
