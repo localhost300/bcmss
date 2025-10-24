@@ -4,6 +4,7 @@ import { Prisma, SchoolClass } from "@prisma/client";
 import prisma from "@/lib/prisma";
 import { NotFoundError } from "./errors";
 import { coerceToIntId } from "./utils";
+import { deleteExamCascade } from "./exams";
 
 const DEFAULT_PAGE_SIZE = 20;
 const MAX_PAGE_SIZE = 500;
@@ -218,12 +219,62 @@ export async function updateClass(id: string | number | undefined, input: SaveCl
   }
 }
 
+export async function deleteClassCascade(
+  client: Prisma.TransactionClient,
+  classId: number,
+): Promise<void> {
+  const classRecord = await client.schoolClass.findUnique({
+    where: { id: classId },
+    select: { id: true, name: true },
+  });
+
+  if (!classRecord) {
+    throw new NotFoundError("Class not found.");
+  }
+
+  const exams = await client.exam.findMany({
+    where: { classId: classRecord.id },
+    select: { id: true },
+  });
+
+  for (const exam of exams) {
+    await deleteExamCascade(client, exam.id);
+  }
+
+  await client.teacherClass.deleteMany({ where: { classId: classRecord.id } });
+  await client.subjectClass.deleteMany({ where: { classId: classRecord.id } });
+  await client.student.updateMany({
+    where: { classId: classRecord.id },
+    data: { classId: null, className: null },
+  });
+
+  const classFilters: Prisma.StudentScoreRecordWhereInput[] = [
+    { classId: String(classRecord.id) },
+  ];
+
+  if (classRecord.name) {
+    classFilters.push({
+      className: { equals: classRecord.name, mode: "insensitive" },
+    });
+  }
+
+  await client.studentScoreRecord.deleteMany({
+    where: { OR: classFilters },
+  });
+  await client.schoolClass.delete({ where: { id: classRecord.id } });
+}
+
 export async function deleteClass(id: string | number | undefined): Promise<void> {
   const classId = coerceToIntId(id, "class");
 
   try {
-    await prisma.schoolClass.delete({ where: { id: classId } });
+    await prisma.$transaction(async (tx) => {
+      await deleteClassCascade(tx, classId);
+    });
   } catch (error) {
+    if (error instanceof NotFoundError) {
+      throw error;
+    }
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2025") {
       throw new NotFoundError("Class not found.");
     }

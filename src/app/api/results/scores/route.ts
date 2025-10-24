@@ -1,8 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
-import { Prisma, StudentScoreRecord } from "@prisma/client";
+import { ExamType, Prisma, ResultLock, StudentScoreRecord, Term } from "@prisma/client";
 
 import prisma from "@/lib/prisma";
 import { resolveRequestActor } from "@/lib/auth/permissions";
+import {
+  examTypeEnumToLabel,
+  examTypeLabelToEnum,
+  findResultLocksByKeys,
+  listResultLocks,
+  ResultLockKey,
+  ResultLockSummary,
+  termEnumToLabel,
+  termLabelToEnum,
+  toNumberArray,
+  summariseResultLock,
+} from "@/lib/services/resultLocks";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -115,6 +127,38 @@ const coerceNumber = (value: unknown): number | null => {
     }
   }
   return null;
+};
+
+type SerializedLock = ResultLockSummary;
+
+const LOCK_KEY_SEPARATOR = "::";
+
+const buildLockKey = (
+  classId: string | number,
+  sessionId: string,
+  term: string,
+  examType: string,
+) => [String(classId), sessionId, term, examType].join(LOCK_KEY_SEPARATOR);
+
+const buildEnumLockKey = (key: ResultLockKey) =>
+  [key.classId, key.sessionId, key.term, key.examType].join(LOCK_KEY_SEPARATOR);
+
+const parseClassIdParam = (value: string | number | null | undefined): number | null => {
+  if (value == null) return null;
+  const parsed =
+    typeof value === "number"
+      ? value
+      : Number.parseInt(value, 10);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
+const createLockMap = (locks: SerializedLock[]) => {
+  const map = new Map<string, SerializedLock>();
+  locks.forEach((lock) => {
+    const key = buildLockKey(lock.classId, lock.sessionId, lock.term, lock.examType);
+    map.set(key, lock);
+  });
+  return map;
 };
 const normalizeComponents = (components: ScoreComponentPayload[] | undefined): NormalizedComponent[] => {
   if (!Array.isArray(components)) {
@@ -321,7 +365,53 @@ export async function GET(request: NextRequest) {
     stopDbTimer();
     console.log(`[Results Scores] GET returning ${records.length} rows (limit=${limit}).`);
 
-    const filtered = actor.isTeacher
+    const classIdNumber = parseClassIdParam(classId);
+    const requestedTermEnum = termLabelToEnum(term);
+    const requestedExamTypeEnum = examTypeLabelToEnum(examType);
+
+    let lockRecords: ResultLock[] = [];
+
+    if (classIdNumber && sessionId) {
+      lockRecords = await listResultLocks({
+        classId: classIdNumber,
+        sessionId,
+        ...(requestedTermEnum ? { term: requestedTermEnum } : {}),
+        ...(requestedExamTypeEnum ? { examType: requestedExamTypeEnum } : {}),
+      });
+    }
+
+    if (lockRecords.length === 0) {
+      const derivedKeys = new Map<string, ResultLockKey>();
+      records.forEach((record) => {
+        const derivedClassId = parseClassIdParam(record.classId);
+        const derivedTermEnum = termLabelToEnum(record.term);
+        const derivedExamTypeEnum = examTypeLabelToEnum(record.examType);
+        if (
+          derivedClassId &&
+          derivedTermEnum &&
+          derivedExamTypeEnum
+        ) {
+          const key: ResultLockKey = {
+            classId: derivedClassId,
+            sessionId: record.sessionId,
+            term: derivedTermEnum,
+            examType: derivedExamTypeEnum,
+          };
+          const uniqueKey = buildEnumLockKey(key);
+          if (!derivedKeys.has(uniqueKey)) {
+            derivedKeys.set(uniqueKey, key);
+          }
+        }
+      });
+      if (derivedKeys.size) {
+        lockRecords = await findResultLocksByKeys(Array.from(derivedKeys.values()));
+      }
+    }
+
+    const serializedLocks = lockRecords.map(summariseResultLock);
+    const lockMap = createLockMap(serializedLocks);
+
+    const teacherFiltered = actor.isTeacher
       ? records.filter((record) => {
           if (!actor.allowedClassIds.has(record.classId)) {
             return false;
@@ -334,7 +424,16 @@ export async function GET(request: NextRequest) {
         })
       : records;
 
-    return NextResponse.json({ data: filtered.map(mapRecord) });
+    const viewerIsParentOrStudent = actor.role === "parent" || actor.role === "student";
+    const visibleRecords = viewerIsParentOrStudent
+      ? teacherFiltered.filter((record) => {
+          const key = buildLockKey(record.classId, record.sessionId, record.term, record.examType);
+          const lock = lockMap.get(key);
+          return Boolean(lock?.isLocked);
+        })
+      : teacherFiltered;
+
+    return NextResponse.json({ data: visibleRecords.map(mapRecord), locks: serializedLocks });
   } catch (error) {
     console.error("[Results API] Failed to load scores", error);
     return NextResponse.json({ message: "Unable to load scores." }, { status: 500 });
@@ -367,6 +466,12 @@ export async function POST(request: NextRequest) {
         { status: 403 },
       );
     }
+    if (!actor.isAdmin && !actor.isTeacher) {
+      return NextResponse.json(
+        { message: "You are not allowed to upload scores." },
+        { status: 403 },
+      );
+    }
 
     let body: SaveScoresBody | null = null;
     try {
@@ -393,6 +498,12 @@ export async function POST(request: NextRequest) {
 
     console.log(`[Results Scores] POST validating ${body.rows.length} rows.`);
     const preparedRows: PreparedScoreRow[] = [];
+    const lockMetadata: Array<{
+      row: SaveScoreRowPayload;
+      classId: number;
+      termEnum: Term;
+      examTypeEnum: ExamType;
+    }> = [];
 
     for (const row of body.rows) {
       if (!isString(row.id)) {
@@ -420,6 +531,30 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ message: `Score row ${row.id} is missing a sessionId.` }, { status: 400 });
       }
 
+      const numericClassId = parseClassIdParam(row.classId);
+      if (!numericClassId || numericClassId <= 0) {
+        return NextResponse.json(
+          { message: `Score row ${row.id} is missing a valid class identifier.` },
+          { status: 400 },
+        );
+      }
+
+      const termEnum = termLabelToEnum(row.term);
+      if (!termEnum) {
+        return NextResponse.json(
+          { message: `Score row ${row.id} is missing a recognised term.` },
+          { status: 400 },
+        );
+      }
+
+      const examTypeEnum = examTypeLabelToEnum(row.examType);
+      if (!examTypeEnum) {
+        return NextResponse.json(
+          { message: `Score row ${row.id} is missing a recognised exam type.` },
+          { status: 400 },
+        );
+      }
+
       if (actor.isTeacher) {
         if (!actor.allowedClassIds.has(row.classId)) {
           return NextResponse.json(
@@ -436,6 +571,13 @@ export async function POST(request: NextRequest) {
         }
       }
 
+      lockMetadata.push({
+        row,
+        classId: numericClassId,
+        termEnum,
+        examTypeEnum,
+      });
+
       preparedRows.push({
         row,
         components: normalizeComponents(row.components),
@@ -443,6 +585,63 @@ export async function POST(request: NextRequest) {
         maxScore: coerceNumber(row.maxScore),
         percentage: coerceNumber(row.percentage),
       });
+    }
+
+    const lockKeyMap = new Map<string, ResultLockKey>();
+    lockMetadata.forEach(({ row, classId, termEnum, examTypeEnum }) => {
+      const key: ResultLockKey = {
+        classId,
+        sessionId: row.sessionId,
+        term: termEnum,
+        examType: examTypeEnum,
+      };
+      lockKeyMap.set(buildEnumLockKey(key), key);
+    });
+
+    let existingLocks: ResultLock[] = [];
+    if (lockKeyMap.size) {
+      existingLocks = await findResultLocksByKeys(Array.from(lockKeyMap.values()));
+    }
+
+    const lockLookup = new Map<
+      string,
+      { lock: ResultLock; allowed: Set<number> }
+    >();
+    existingLocks.forEach((lock) => {
+      const key = buildEnumLockKey({
+        classId: lock.classId,
+        sessionId: lock.sessionId,
+        term: lock.term,
+        examType: lock.examType,
+      });
+      lockLookup.set(key, {
+        lock,
+        allowed: new Set(toNumberArray(lock.allowedTeacherIds)),
+      });
+    });
+
+    if (!actor.isAdmin) {
+      const teacherId = actor.teacherId ?? null;
+      for (const meta of lockMetadata) {
+        const key = buildEnumLockKey({
+          classId: meta.classId,
+          sessionId: meta.row.sessionId,
+          term: meta.termEnum,
+          examType: meta.examTypeEnum,
+        });
+        const info = lockLookup.get(key);
+        if (info?.lock.isLocked) {
+          if (actor.isTeacher && teacherId != null && info.allowed.has(teacherId)) {
+            continue;
+          }
+          return NextResponse.json(
+            {
+              message: `Scores for ${meta.row.className} (${meta.row.examType}) are locked. Contact an administrator to request changes.`,
+            },
+            { status: 403 },
+          );
+        }
+      }
     }
 
     const stopPersistTimer = createTimer("POST persist batches");

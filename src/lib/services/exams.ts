@@ -15,6 +15,17 @@ type SaveExamInput = {
   sessionId?: string;
 };
 
+const termEnumToLabel: Record<Term, string> = {
+  FIRST: "First Term",
+  SECOND: "Second Term",
+  THIRD: "Third Term",
+};
+
+const examTypeEnumToLabel: Record<ExamType, "midterm" | "final"> = {
+  MIDTERM: "midterm",
+  FINAL: "final",
+};
+
 const resolveClassAndSubject = async (classId: number, subjectId: number) => {
   const [klass, subject] = await Promise.all([
     prisma.schoolClass.findUnique({ where: { id: classId } }),
@@ -140,12 +151,72 @@ export async function updateExam(
   }
 }
 
+export async function deleteExamCascade(
+  client: Prisma.TransactionClient,
+  examId: number,
+): Promise<void> {
+  const exam = await client.exam.findUnique({
+    where: { id: examId },
+    select: {
+      id: true,
+      classId: true,
+      sessionId: true,
+      term: true,
+      examType: true,
+      subject: { select: { name: true } },
+      class: { select: { name: true } },
+    },
+  });
+
+  if (!exam) {
+    throw new NotFoundError("Exam not found.");
+  }
+
+  await client.examScore.deleteMany({ where: { examId } });
+
+  const matchFilters: Prisma.StudentScoreRecordWhereInput[] = [
+    { sessionId: exam.sessionId },
+    { term: termEnumToLabel[exam.term] },
+    { examType: examTypeEnumToLabel[exam.examType] },
+  ];
+
+  const classConditions: Prisma.StudentScoreRecordWhereInput[] = [
+    { classId: String(exam.classId) },
+  ];
+
+  if (exam.class?.name) {
+    classConditions.push({
+      className: { equals: exam.class.name, mode: "insensitive" },
+    });
+  }
+
+  if (classConditions.length === 1) {
+    matchFilters.push(classConditions[0]);
+  } else {
+    matchFilters.push({ OR: classConditions });
+  }
+
+  if (exam.subject?.name) {
+    matchFilters.push({
+      subject: { equals: exam.subject.name, mode: "insensitive" },
+    });
+  }
+
+  await client.studentScoreRecord.deleteMany({ where: { AND: matchFilters } });
+  await client.exam.delete({ where: { id: examId } });
+}
+
 export async function deleteExam(id: string | number | undefined): Promise<void> {
   const examId = coerceToIntId(id, "exam");
 
   try {
-    await prisma.exam.delete({ where: { id: examId } });
+    await prisma.$transaction(async (tx) => {
+      await deleteExamCascade(tx, examId);
+    });
   } catch (error) {
+    if (error instanceof NotFoundError) {
+      throw error;
+    }
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2025") {
       throw new NotFoundError("Exam not found.");
     }

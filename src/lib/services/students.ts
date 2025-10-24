@@ -34,6 +34,7 @@ type ListStudentsFilters = PaginationParams & {
   search?: string;
   schoolId?: string;
   category?: string;
+  classId?: number;
 };
 
 export type StudentListItem = {
@@ -46,6 +47,7 @@ export type StudentListItem = {
   grade: number | null;
   category: string | null;
   className: string | null;
+  classId: number | null;
   schoolId: string;
   schoolName: string;
   dateOfBirth: string | null;
@@ -126,7 +128,8 @@ const studentSelect = {
   schoolId: true,
   school: { select: { id: true, name: true } },
   className: true,
-  class: { select: { name: true } },
+  classId: true,
+  class: { select: { id: true, name: true } },
   dateOfBirth: true,
   bloodType: true,
 } satisfies Prisma.StudentSelect;
@@ -136,6 +139,7 @@ type StudentWithRelations = Prisma.StudentGetPayload<{ select: typeof studentSel
 const mapStudentRecord = (record: StudentWithRelations): StudentDetail => {
   const schoolName = record.school?.name ?? "";
   const className = record.class?.name ?? record.className ?? null;
+  const classId = record.class?.id ?? record.classId ?? null;
 
   return {
     id: record.id,
@@ -148,6 +152,7 @@ const mapStudentRecord = (record: StudentWithRelations): StudentDetail => {
     grade: record.grade ?? null,
     category: prettifyCategory(record.category),
     className,
+    classId,
     schoolId: record.schoolId,
     schoolName,
     dateOfBirth: record.dateOfBirth ? record.dateOfBirth.toISOString() : null,
@@ -160,7 +165,7 @@ const mapStudentRecord = (record: StudentWithRelations): StudentDetail => {
 
 export async function listStudents(filters: ListStudentsFilters = {}): Promise<ListStudentsResult> {
   const { page, pageSize } = sanitizePaging(filters);
-  const { search, schoolId, category } = filters;
+  const { search, schoolId, category, classId } = filters;
 
   const where: Prisma.StudentWhereInput = {};
 
@@ -171,8 +176,8 @@ export async function listStudents(filters: ListStudentsFilters = {}): Promise<L
       { name: { contains: query, mode: "insensitive" } },
       { email: { contains: query, mode: "insensitive" } },
       { phone: { contains: query, mode: "insensitive" } },
-       { guardianEmail: { contains: query, mode: "insensitive" } },
-       { bloodType: { contains: query, mode: "insensitive" } },
+      { guardianEmail: { contains: query, mode: "insensitive" } },
+      { bloodType: { contains: query, mode: "insensitive" } },
       { className: { contains: query, mode: "insensitive" } },
     ];
   }
@@ -186,6 +191,10 @@ export async function listStudents(filters: ListStudentsFilters = {}): Promise<L
     if (normalised in StudentCategory) {
       where.category = normalised as StudentCategory;
     }
+  }
+
+  if (typeof classId === "number" && Number.isFinite(classId)) {
+    where.classId = classId;
   }
 
   const skip = (page - 1) * pageSize;
@@ -397,12 +406,38 @@ export async function updateStudent(
   });
 }
 
+export async function deleteStudentCascade(
+  client: Prisma.TransactionClient,
+  studentId: number,
+): Promise<void> {
+  const student = await client.student.findUnique({
+    where: { id: studentId },
+    select: { id: true },
+  });
+
+  if (!student) {
+    throw new NotFoundError("Student not found.");
+  }
+
+  await client.studentParent.deleteMany({ where: { studentId } });
+  await client.studentAttendance.deleteMany({ where: { studentId } });
+  await client.studentMessage.deleteMany({ where: { studentId } });
+  await client.examScore.deleteMany({ where: { studentId } });
+  await client.studentScoreRecord.deleteMany({ where: { studentId } });
+  await client.student.delete({ where: { id: studentId } });
+}
+
 export async function deleteStudent(id: string | number | undefined): Promise<void> {
   const studentId = coerceToIntId(id, "student");
 
   try {
-    await prisma.student.delete({ where: { id: studentId } });
+    await prisma.$transaction(async (tx) => {
+      await deleteStudentCascade(tx, studentId);
+    });
   } catch (error) {
+    if (error instanceof NotFoundError) {
+      throw error;
+    }
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2025") {
       throw new NotFoundError("Student not found.");
     }

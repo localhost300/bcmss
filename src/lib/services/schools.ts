@@ -2,6 +2,12 @@ import { Prisma, School } from "@prisma/client";
 import { randomUUID } from "node:crypto";
 
 import prisma from "@/lib/prisma";
+import { NotFoundError } from "./errors";
+import { deleteClassCascade } from "./classes";
+import { deleteSubjectCascade } from "./subjects";
+import { deleteTeacherCascade } from "./teachers";
+import { deleteStudentCascade } from "./students";
+import { deleteExamCascade } from "./exams";
 
 const DEFAULT_PAGE_SIZE = 20;
 const MAX_PAGE_SIZE = 500;
@@ -275,5 +281,66 @@ export async function updateSchool(
 }
 
 export async function deleteSchool(id: string): Promise<void> {
-  await prisma.school.delete({ where: { id } });
+  await prisma.$transaction(async (tx) => {
+    const school = await tx.school.findUnique({
+      where: { id },
+      select: { id: true },
+    });
+
+    if (!school) {
+      throw new NotFoundError("School not found.");
+    }
+
+    const classIds = await tx.schoolClass.findMany({
+      where: { schoolId: id },
+      select: { id: true },
+    });
+
+    for (const klass of classIds) {
+      await deleteClassCascade(tx, klass.id);
+    }
+
+    const subjectIds = await tx.subject.findMany({
+      where: { schoolId: id },
+      select: { id: true },
+    });
+
+    for (const subject of subjectIds) {
+      await deleteSubjectCascade(tx, subject.id);
+    }
+
+    const teacherIds = await tx.teacher.findMany({
+      where: { schoolId: id },
+      select: { id: true },
+    });
+
+    for (const teacher of teacherIds) {
+      await deleteTeacherCascade(tx, teacher.id);
+    }
+
+    const studentIds = await tx.student.findMany({
+      where: { schoolId: id },
+      select: { id: true },
+    });
+
+    for (const student of studentIds) {
+      await deleteStudentCascade(tx, student.id);
+    }
+
+    await tx.parent.deleteMany({ where: { schoolId: id } });
+    await tx.schoolManager.deleteMany({ where: { schoolId: id } });
+    await tx.academicSessionOnSchool.deleteMany({ where: { schoolId: id } });
+    await tx.markDistribution.deleteMany({ where: { schoolId: id } });
+
+    const remainingExams = await tx.exam.findMany({
+      where: { schoolId: id },
+      select: { id: true },
+    });
+
+    for (const exam of remainingExams) {
+      await deleteExamCascade(tx, exam.id);
+    }
+
+    await tx.school.delete({ where: { id } });
+  });
 }

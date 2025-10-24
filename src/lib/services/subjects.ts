@@ -3,6 +3,7 @@ import { Prisma, Subject } from "@prisma/client";
 import prisma from "@/lib/prisma";
 import { NotFoundError } from "./errors";
 import { coerceToIntId } from "./utils";
+import { deleteExamCascade } from "./exams";
 
 const DEFAULT_PAGE_SIZE = 20;
 const MAX_PAGE_SIZE = 500;
@@ -303,12 +304,53 @@ export async function updateSubject(
   }
 }
 
+export async function deleteSubjectCascade(
+  client: Prisma.TransactionClient,
+  subjectId: number,
+): Promise<void> {
+  const subject = await client.subject.findUnique({
+    where: { id: subjectId },
+    select: { id: true, name: true },
+  });
+
+  if (!subject) {
+    throw new NotFoundError("Subject not found.");
+  }
+
+  const exams = await client.exam.findMany({
+    where: { subjectId: subject.id },
+    select: { id: true },
+  });
+
+  for (const exam of exams) {
+    await deleteExamCascade(client, exam.id);
+  }
+
+  await client.teacherSubject.deleteMany({ where: { subjectId: subject.id } });
+  await client.subjectClass.deleteMany({ where: { subjectId: subject.id } });
+
+  if (subject.name) {
+    await client.studentScoreRecord.deleteMany({
+      where: {
+        subject: { equals: subject.name, mode: "insensitive" },
+      },
+    });
+  }
+
+  await client.subject.delete({ where: { id: subject.id } });
+}
+
 export async function deleteSubject(id: string | number | undefined): Promise<void> {
   const subjectId = coerceToIntId(id, "subject");
 
   try {
-    await prisma.subject.delete({ where: { id: subjectId } });
+    await prisma.$transaction(async (tx) => {
+      await deleteSubjectCascade(tx, subjectId);
+    });
   } catch (error) {
+    if (error instanceof NotFoundError) {
+      throw error;
+    }
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2025") {
       throw new NotFoundError("Subject not found.");
     }

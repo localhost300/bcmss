@@ -10,6 +10,7 @@ import React, {
   useRef,
 } from "react";
 
+import { useAuth, type UserRole } from "@/contexts/AuthContext";
 import { useSchoolScope } from "@/contexts/SchoolContext";
 import { useSessionScope, useTermScope } from "@/contexts/SessionContext";
 import {
@@ -143,6 +144,9 @@ type ResultsContextValue = {
   finalizePromotion: (filters: ClassFilters) => PromotionCandidate[];
   markDistributionLoading: boolean;
   markDistributionError: string | null;
+  getLockInfo: (
+    filters: ClassFilters & { examType: "midterm" | "final" },
+  ) => LockInfo | null;
 };
 
 const ResultsContext = createContext<ResultsContextValue | undefined>(
@@ -237,6 +241,19 @@ const mapScoreRecord = (raw: unknown): ScoreRecord => {
 
 const DEFAULT_MIDTERM_MAX = 50;
 const DEFAULT_FINAL_MAX = 100;
+
+type LockInfo = {
+  id: number;
+  classId: number;
+  sessionId: string;
+  term: Term;
+  examType: "midterm" | "final";
+  isLocked: boolean;
+  lockedBy: string | null;
+  lockedAt: string | null;
+  allowedTeacherIds: number[];
+  notes: string | null;
+};
 
 const buildRecordKey = (record: ScoreRecord) =>
   [
@@ -413,6 +430,9 @@ export const ResultsProvider = ({ children }: ResultsProviderProps) => {
   const schoolScope = useSchoolScope();
   const termScope = useTermScope();
   const sessionScope = useSessionScope();
+  const { user } = useAuth();
+  const userRole: UserRole = user?.role ?? "teacher";
+  const isParentOrStudent = userRole === "parent" || userRole === "student";
 
   const term = termScope ?? "First Term";
 
@@ -488,6 +508,9 @@ export const ResultsProvider = ({ children }: ResultsProviderProps) => {
   >({});
   const [promotionDecisions, setPromotionDecisions] = useState<
     Record<string, "promote" | "hold">
+  >({});
+  const [classLocks, setClassLocks] = useState<
+    Record<string, Partial<Record<"midterm" | "final", LockInfo | null>>>
   >({});
 
   useEffect(() => {
@@ -578,7 +601,91 @@ export const ResultsProvider = ({ children }: ResultsProviderProps) => {
         };
 
         const rawRecords = extractRecords(response).map(mapScoreRecord);
-        const records = alignRecordsWithMarkDistributions(rawRecords, markDistributions);
+        let records = alignRecordsWithMarkDistributions(rawRecords, markDistributions);
+        const responseObject =
+          response && typeof response === "object"
+            ? (response as Record<string, unknown>)
+            : null;
+        const lockEntriesRaw = responseObject?.locks;
+        const parsedLocks: Partial<Record<"midterm" | "final", LockInfo | null>> = {
+          midterm: null,
+          final: null,
+        };
+        const numericClassId = Number(classId);
+        if (Array.isArray(lockEntriesRaw)) {
+          lockEntriesRaw.forEach((entry) => {
+            if (!entry || typeof entry !== "object") {
+              return;
+            }
+            const record = entry as Record<string, unknown>;
+            const entryClassId =
+              typeof record.classId === "number"
+                ? record.classId
+                : typeof record.classId === "string"
+                ? Number(record.classId)
+                : NaN;
+            if (!Number.isFinite(entryClassId) || entryClassId !== numericClassId) {
+              return;
+            }
+            const entrySessionId =
+              typeof record.sessionId === "string" && record.sessionId.length > 0
+                ? record.sessionId
+                : "";
+            if (entrySessionId !== sessionId) {
+              return;
+            }
+            const entryTerm =
+              typeof record.term === "string" && record.term.length > 0 ? record.term : "";
+            if (entryTerm !== term) {
+              return;
+            }
+            const entryExamTypeRaw =
+              typeof record.examType === "string" && record.examType.length > 0
+                ? record.examType.toLowerCase()
+                : "";
+            if (entryExamTypeRaw !== "midterm" && entryExamTypeRaw !== "final") {
+              return;
+            }
+            const allowedTeacherIds = Array.isArray(record.allowedTeacherIds)
+              ? (record.allowedTeacherIds as unknown[])
+                  .map((value) => {
+                    if (typeof value === "number" && Number.isFinite(value)) {
+                      return value;
+                    }
+                    if (typeof value === "string") {
+                      const parsed = Number(value);
+                      return Number.isFinite(parsed) ? parsed : null;
+                    }
+                    return null;
+                  })
+                  .filter((value): value is number => value != null)
+              : [];
+            parsedLocks[entryExamTypeRaw] = {
+              id:
+                typeof record.id === "number"
+                  ? record.id
+                  : typeof record.id === "string"
+                  ? Number(record.id)
+                  : 0,
+              classId: numericClassId,
+              sessionId,
+              term,
+              examType: entryExamTypeRaw,
+              isLocked: Boolean(record.isLocked),
+              lockedBy:
+                typeof record.lockedBy === "string" && record.lockedBy.length > 0
+                  ? record.lockedBy
+                  : null,
+              lockedAt:
+                typeof record.lockedAt === "string" && record.lockedAt.length > 0
+                  ? record.lockedAt
+                  : null,
+              allowedTeacherIds,
+              notes:
+                typeof record.notes === "string" && record.notes.length > 0 ? record.notes : null,
+            };
+          });
+        }
 
         const examTypeSet = new Set<"midterm" | "final">();
         try {
@@ -618,7 +725,60 @@ export const ResultsProvider = ({ children }: ResultsProviderProps) => {
           "midterm" | "final"
         >;
 
+        let studentsInClass: Array<{
+          id: number;
+          name: string;
+          classId: number | null;
+          className: string | null;
+        }> = [];
+        try {
+          const studentParams = new URLSearchParams();
+          studentParams.set("page", "1");
+          studentParams.set("pageSize", "500");
+          studentParams.set("classId", classId);
+          if (schoolScope) {
+            studentParams.set("schoolId", schoolScope);
+          }
+          const studentResponse = await getJSON<{
+            items?: Array<{ id?: unknown; name?: unknown; classId?: unknown; className?: unknown }>;
+          }>(`/api/students?${studentParams.toString()}`);
+          const items = Array.isArray(studentResponse?.items) ? studentResponse!.items : [];
+          studentsInClass = items
+            .map((item) => {
+              const rawId = typeof item.id === "number" ? item.id : Number(item.id);
+              if (!Number.isFinite(rawId)) {
+                return null;
+              }
+              const classIdValue =
+                typeof item.classId === "number"
+                  ? item.classId
+                  : typeof item.classId === "string"
+                  ? Number(item.classId)
+                  : null;
+              const rawName = typeof item.name === "string" ? item.name : "";
+              const classNameValue = typeof item.className === "string" ? item.className : null;
+              return {
+                id: rawId,
+                name: rawName,
+                classId: Number.isFinite(classIdValue ?? NaN) ? (classIdValue as number) : null,
+                className: classNameValue,
+              };
+            })
+            .filter((entry): entry is { id: number; name: string; classId: number | null; className: string | null } =>
+              Boolean(entry),
+            );
+        } catch (studentError) {
+          console.error("[ResultsContext] Unable to load students for class", studentError);
+        }
+
         setClassExamTypes((prev) => ({ ...prev, [key]: orderedExamTypes }));
+        setClassLocks((prev) => ({
+          ...prev,
+          [key]: {
+            midterm: parsedLocks.midterm ?? null,
+            final: parsedLocks.final ?? null,
+          },
+        }));
 
         let fallbackSubjects = subjectAssignmentsRef.current[String(classId)] ?? [];
         if (!fallbackSubjects.length) {
@@ -652,6 +812,71 @@ export const ResultsProvider = ({ children }: ResultsProviderProps) => {
           } catch (subjectError) {
             console.error("[ResultsContext] Unable to load class subject catalogue", subjectError);
             fallbackSubjects = [];
+          }
+        }
+
+        if (!isParentOrStudent && studentsInClass.length && orderedExamTypes.length) {
+          const subjectsForPlaceholders =
+            fallbackSubjects.length > 0
+              ? fallbackSubjects
+              : Array.from(new Set(records.map((record) => record.subject)));
+
+          if (subjectsForPlaceholders.length > 0) {
+            const existingKeys = new Set(records.map((record) => buildRecordKey(record)));
+            const placeholderRawRecords: ScoreRecord[] = [];
+            const classIdString = classId;
+
+            studentsInClass.forEach((student) => {
+              const studentId = student.id;
+              if (!Number.isFinite(studentId)) {
+                return;
+              }
+              const studentName =
+                typeof student.name === "string" && student.name.trim()
+                  ? student.name.trim()
+                  : `Student ${studentId}`;
+
+              subjectsForPlaceholders.forEach((subjectName) => {
+                if (!subjectName) {
+                  return;
+                }
+                orderedExamTypes.forEach((examType) => {
+                  const placeholder: ScoreRecord = {
+                    id: `placeholder-${studentId}-${subjectName.replace(/\s+/g, "-").toLowerCase()}-${examType}-${sessionId}-${term}`,
+                    studentId,
+                    studentName,
+                    classId: classIdString,
+                    className:
+                      student.className ??
+                      records.find((record) => record.studentId === studentId)?.className ??
+                      "",
+                    subject: subjectName,
+                    examType,
+                    term,
+                    sessionId,
+                    components: [],
+                    totalScore: 0,
+                    maxScore: examType === "midterm" ? DEFAULT_MIDTERM_MAX : DEFAULT_FINAL_MAX,
+                    percentage: 0,
+                  };
+
+                  const key = buildRecordKey(placeholder);
+                  if (existingKeys.has(key)) {
+                    return;
+                  }
+                  existingKeys.add(key);
+                  placeholderRawRecords.push(placeholder);
+                });
+              });
+            });
+
+            if (placeholderRawRecords.length) {
+              const alignedPlaceholders = alignRecordsWithMarkDistributions(
+                placeholderRawRecords,
+                markDistributions,
+              );
+              records = [...records, ...alignedPlaceholders];
+            }
           }
         }
 
@@ -715,7 +940,7 @@ export const ResultsProvider = ({ children }: ResultsProviderProps) => {
         setClassLoading((prev) => ({ ...prev, [key]: false }));
       }
     },
-    [markDistributions, schoolScope],
+    [markDistributions, schoolScope, isParentOrStudent],
   );
 
   const isClassLoading = useCallback(
@@ -1093,6 +1318,14 @@ export const ResultsProvider = ({ children }: ResultsProviderProps) => {
     [getPromotionCandidates],
   );
 
+  const getLockInfo = useCallback(
+    ({ classId, term, sessionId, examType }: ClassFilters & { examType: "midterm" | "final" }) => {
+      const key = buildClassKey({ classId, term, sessionId });
+      return classLocks[key]?.[examType] ?? null;
+    },
+    [classLocks],
+  );
+
   const value = useMemo<ResultsContextValue>(
     () => ({
       classOptions,
@@ -1118,6 +1351,7 @@ export const ResultsProvider = ({ children }: ResultsProviderProps) => {
       finalizePromotion,
       markDistributionLoading,
       markDistributionError,
+      getLockInfo,
     }),
     [
       classOptions,
@@ -1142,6 +1376,7 @@ export const ResultsProvider = ({ children }: ResultsProviderProps) => {
       finalizePromotion,
       markDistributionLoading,
       markDistributionError,
+      getLockInfo,
     ],
   );
 

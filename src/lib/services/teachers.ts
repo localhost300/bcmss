@@ -338,12 +338,40 @@ export async function updateTeacher(
     throw error;
   }
 }
+
+export async function deleteTeacherCascade(
+  client: Prisma.TransactionClient,
+  teacherId: number,
+): Promise<void> {
+  const teacher = await client.teacher.findUnique({
+    where: { id: teacherId },
+    select: { id: true },
+  });
+
+  if (!teacher) {
+    throw new NotFoundError("Teacher not found.");
+  }
+
+  await client.teacherSubject.deleteMany({ where: { teacherId } });
+  await client.teacherClass.deleteMany({ where: { teacherId } });
+  await client.schoolClass.updateMany({
+    where: { formTeacherId: teacherId },
+    data: { formTeacherId: null },
+  });
+
+  await client.teacher.delete({ where: { id: teacherId } });
+}
 export async function deleteTeacher(id: string | number | undefined): Promise<void> {
   const teacherId = coerceToIntId(id, "teacher");
 
   try {
-    await prisma.teacher.delete({ where: { id: teacherId } });
+    await prisma.$transaction(async (tx) => {
+      await deleteTeacherCascade(tx, teacherId);
+    });
   } catch (error) {
+    if (error instanceof NotFoundError) {
+      throw error;
+    }
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2025") {
       throw new NotFoundError("Teacher not found.");
     }

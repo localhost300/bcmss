@@ -18,6 +18,7 @@ const querySchema = z.object({
   search: z.string().trim().optional(),
   schoolId: z.string().trim().optional(),
   category: z.string().trim().optional(),
+  classId: z.coerce.number().int().positive().optional(),
 });
 
 const requestSchema = z.object({

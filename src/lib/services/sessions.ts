@@ -4,6 +4,7 @@ import { AcademicSession, Prisma } from "@prisma/client";
 import prisma from "@/lib/prisma";
 import { InvalidIdError, NotFoundError } from "./errors";
 import { coerceToStringId } from "./utils";
+import { deleteExamCascade } from "./exams";
 
 const DEFAULT_PAGE_SIZE = 20;
 const MAX_PAGE_SIZE = 500;
@@ -226,8 +227,34 @@ export async function deleteSession(id: string | number | undefined): Promise<vo
   const sessionId = coerceToStringId(id, "session");
 
   try {
-    await prisma.academicSession.delete({ where: { id: sessionId } });
+    await prisma.$transaction(async (tx) => {
+      const session = await tx.academicSession.findUnique({
+        where: { id: sessionId },
+        select: { id: true },
+      });
+
+      if (!session) {
+        throw new NotFoundError("Session not found.");
+      }
+
+      const exams = await tx.exam.findMany({
+        where: { sessionId },
+        select: { id: true },
+      });
+
+      for (const exam of exams) {
+        await deleteExamCascade(tx, exam.id);
+      }
+
+      await tx.markDistribution.deleteMany({ where: { sessionId } });
+      await tx.studentScoreRecord.deleteMany({ where: { sessionId } });
+      await tx.academicSessionOnSchool.deleteMany({ where: { sessionId } });
+      await tx.academicSession.delete({ where: { id: sessionId } });
+    });
   } catch (error) {
+    if (error instanceof NotFoundError) {
+      throw error;
+    }
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2025") {
       throw new NotFoundError("Session not found.");
     }

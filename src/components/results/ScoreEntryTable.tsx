@@ -11,11 +11,20 @@ export type ScoreEntryTableProps = {
   onScoreChange: (sheetId: string, componentId: string, value: number) => void;
   onSave: () => void;
   isSaving?: boolean;
+  readOnly?: boolean;
 };
 
 const componentKey = (componentId: string) => componentId;
 
-const ScoreEntryTable = ({ rows, examType, resolveGrade, onScoreChange, onSave, isSaving }: ScoreEntryTableProps) => {
+const ScoreEntryTable = ({
+  rows,
+  examType,
+  resolveGrade,
+  onScoreChange,
+  onSave,
+  isSaving,
+  readOnly = false,
+}: ScoreEntryTableProps) => {
   const componentHeaders = useMemo(() => {
     const firstRow = rows[0];
     if (!firstRow) {
@@ -66,10 +75,11 @@ const ScoreEntryTable = ({ rows, examType, resolveGrade, onScoreChange, onSave, 
                     <td key={componentKey(component.componentId)} className="px-4 py-3">
                       <input
                         type="number"
-                        className="w-full rounded-md border border-gray-200 px-2 py-1 text-sm"
+                        className="w-full rounded-md border border-gray-200 px-2 py-1 text-sm disabled:bg-gray-100 disabled:text-gray-400"
                         min={0}
                         max={component.maxScore ?? undefined}
                         value={component.score}
+                        disabled={readOnly}
                         onChange={(event) =>
                           onScoreChange(row.id, component.componentId, Number(event.target.value) || 0)
                         }
@@ -92,11 +102,16 @@ const ScoreEntryTable = ({ rows, examType, resolveGrade, onScoreChange, onSave, 
           type="button"
           onClick={onSave}
           className="bg-lamaSky text-white text-sm font-medium px-4 py-2 rounded-md disabled:opacity-50"
-          disabled={isSaving}
+          disabled={isSaving || readOnly}
         >
           {isSaving ? "Saving..." : "Save Scores"}
         </button>
       </div>
+      {readOnly && (
+        <div className="px-4 pb-4 text-xs text-gray-500 text-right">
+          Results are locked. Editing is disabled.
+        </div>
+      )}
     </div>
   );
 };

@@ -1,10 +1,12 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useMemo, useState } from "react";
 
 import ScoreEntryTable from "@/components/results/ScoreEntryTable";
+import { useAuth } from "@/contexts/AuthContext";
 import { useResults, type ScoreSheetRow } from "@/contexts/ResultsContext";
 import { useSessionScope, useTermScope } from "@/contexts/SessionContext";
+import { postJSON } from "@/lib/utils/api";
 
 type ExamSelection = "midterm" | "final";
 
@@ -34,6 +36,7 @@ const LoadScoresPage = () => {
     gradeForPercentage,
     gradeForMidterm,
     getAvailableExamTypes,
+    getLockInfo,
   } = useResults();
 
   const [selectedClass, setSelectedClass] = useState("");
@@ -43,6 +46,22 @@ const LoadScoresPage = () => {
   const [isSaving, setIsSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [lockActionLoading, setLockActionLoading] = useState<Record<ExamSelection, boolean>>({
+    midterm: false,
+    final: false,
+  });
+  const [overrideInputs, setOverrideInputs] = useState<Record<ExamSelection, string>>({
+    midterm: "",
+    final: "",
+  });
+  const [lockActionError, setLockActionError] = useState<string | null>(null);
+  const [lockActionMessage, setLockActionMessage] = useState<string | null>(null);
+
+  const { user } = useAuth();
+  const userRole = user?.role ?? "teacher";
+  const teacherId = typeof user?.teacherId === "number" ? user.teacherId : null;
+  const isAdmin = userRole === "admin";
+  const isTeacher = userRole === "teacher";
 
   useEffect(() => {
     setHydrated(true);
@@ -78,6 +97,47 @@ const LoadScoresPage = () => {
     return getSubjectsForClass({ classId: selectedClass, examType, term, sessionId });
   }, [selectedClass, examType, term, sessionId, availableExamTypes, getSubjectsForClass]);
 
+  type LockInfoType = ReturnType<typeof getLockInfo>;
+
+  const lockInfoMap = useMemo<Record<ExamSelection, LockInfoType>>(() => {
+    const base: Record<ExamSelection, LockInfoType> = { midterm: null, final: null };
+    if (!selectedClass) {
+      return base;
+    }
+    availableExamTypes.forEach((type) => {
+      base[type] = getLockInfo({ classId: selectedClass, term, sessionId, examType: type });
+    });
+    return base;
+  }, [selectedClass, term, sessionId, availableExamTypes, getLockInfo]);
+
+  const activeLock = lockInfoMap[examType];
+  const teacherHasOverride = Boolean(
+    isTeacher && teacherId != null && activeLock?.allowedTeacherIds.includes(teacherId),
+  );
+
+  const isReadOnly = useMemo(() => {
+    if (!selectedClass) return true;
+    if (isAdmin) return false;
+    if (!isTeacher) return true;
+    if (!activeLock?.isLocked) return false;
+    return !teacherHasOverride;
+  }, [selectedClass, isAdmin, isTeacher, activeLock, teacherHasOverride]);
+
+  const lockMessage = useMemo(() => {
+    if (!activeLock?.isLocked) return null;
+    const lockedDate = activeLock.lockedAt ? new Date(activeLock.lockedAt) : null;
+    const formatted = lockedDate ? lockedDate.toLocaleString() : null;
+    if (isAdmin) {
+      return `Published${formatted ? ` on ${formatted}` : ""}.`;
+    }
+    if (isTeacher) {
+      return teacherHasOverride
+        ? `Published${formatted ? ` on ${formatted}` : ""}. You have temporary edit access granted by an administrator.`
+        : `Published${formatted ? ` on ${formatted}` : ""}. Contact an administrator to request changes.`;
+    }
+    return "Results have been published.";
+  }, [activeLock, isAdmin, isTeacher, teacherHasOverride]);
+
   useEffect(() => {
     if (!subjects.length) {
       setSelectedSubject("");
@@ -111,12 +171,119 @@ const LoadScoresPage = () => {
     return (row: ScoreSheetRow) => gradeForPercentage(row.percentage);
   }, [examType, gradeForMidterm, gradeForPercentage]);
 
+  const runLockMutation = async (
+    targetExamType: ExamSelection,
+    payload: Record<string, unknown>,
+    successMessage: string,
+  ) => {
+    if (!selectedClass || !sessionId) {
+      setLockActionError("Select a class before updating publishing settings.");
+      setLockActionMessage(null);
+      return;
+    }
+
+    setLockActionError(null);
+    setLockActionMessage(null);
+    setLockActionLoading((prev) => ({ ...prev, [targetExamType]: true }));
+    try {
+      await postJSON("/api/results/locks", payload);
+      setLockActionMessage(successMessage);
+      await loadClassData({ classId: selectedClass, term, sessionId });
+    } catch (error) {
+      setLockActionError(
+        error instanceof Error ? error.message : "Unable to update publishing settings.",
+      );
+    } finally {
+      setLockActionLoading((prev) => ({ ...prev, [targetExamType]: false }));
+    }
+  };
+
+  const handleLockAction = async (targetExamType: ExamSelection, intent: "lock" | "unlock") => {
+    if (!selectedClass || !sessionId) {
+      setLockActionError("Select a class before updating publishing settings.");
+      setLockActionMessage(null);
+      return;
+    }
+    const label = EXAM_TYPE_LABELS[targetExamType];
+    const action = intent === "lock" ? "lock" : "unlock";
+    await runLockMutation(
+      targetExamType,
+      {
+        action,
+        classId: selectedClass,
+        sessionId,
+        term,
+        examType: targetExamType,
+      },
+      intent === "lock"
+        ? `${label} published successfully.`
+        : `${label} reverted to draft.`,
+    );
+  };
+
+  const handleRevokeOverride = async (targetExamType: ExamSelection, teacherId: number) => {
+    if (!selectedClass || !sessionId) {
+      setLockActionError("Select a class before updating overrides.");
+      setLockActionMessage(null);
+      return;
+    }
+    await runLockMutation(
+      targetExamType,
+      {
+        action: "revokeOverride",
+        classId: selectedClass,
+        sessionId,
+        term,
+        examType: targetExamType,
+        teacherId,
+      },
+      `Override removed for teacher #${teacherId}.`,
+    );
+  };
+  const handleGrantOverride = async (targetExamType: ExamSelection) => {
+    if (!selectedClass || !sessionId) {
+      setLockActionError("Select a class before granting overrides.");
+      setLockActionMessage(null);
+      return;
+    }
+    const rawValue = overrideInputs[targetExamType] ?? "";
+    const trimmed = rawValue.trim();
+    const teacherId = Number.parseInt(trimmed, 10);
+    if (!trimmed || !Number.isFinite(teacherId) || teacherId <= 0) {
+      setLockActionError("Enter a valid teacher ID to grant access.");
+      setLockActionMessage(null);
+      return;
+    }
+    await runLockMutation(
+      targetExamType,
+      {
+        action: "grantOverride",
+        classId: selectedClass,
+        sessionId,
+        term,
+        examType: targetExamType,
+        teacherId,
+      },
+      `Override granted for teacher #${teacherId}.`,
+    );
+    setOverrideInputs((prev) => ({ ...prev, [targetExamType]: "" }));
+  };
   const handleScoreChange = (sheetId: string, componentId: string, value: number) => {
+    if (isReadOnly) {
+      return;
+    }
     updateScore(sheetId, componentId, value);
   };
 
   const handleSave = async () => {
-    if (!selectedClass || !selectedSubject || !availableExamTypes.includes(examType)) return;
+    if (
+      isReadOnly ||
+      !selectedClass ||
+      !selectedSubject ||
+      !availableExamTypes.includes(examType)
+    ) {
+      return;
+    }
     setIsSaving(true);
     setSaveError(null);
     setSaveMessage(null);
@@ -162,7 +329,7 @@ const LoadScoresPage = () => {
         <div>
           <h1 className="text-lg font-semibold">Load Scores</h1>
           <p className="text-xs text-gray-500">
-            Session {sessionId} | {term}
+            Session {sessionId} • {term}
           </p>
         </div>
         <div className="flex flex-wrap gap-3">
@@ -227,7 +394,7 @@ const LoadScoresPage = () => {
               </option>
             ))}
           </select>
-          {classOptionsLoading && <span className="mt-1 text-gray-400">Loading classes…</span>}
+          {classOptionsLoading && <span className="mt-1 text-gray-400">Loading classesâ€¦</span>}
           {classOptionsError && (
             <span className="mt-1 text-red-500 text-xs">{classOptionsError}</span>
           )}
@@ -252,7 +419,122 @@ const LoadScoresPage = () => {
           </select>
         </div>
       </div>
-
+      {isAdmin && selectedClass && (
+        <div className="mt-6 space-y-4 rounded-md border border-gray-200 bg-gray-50 p-4">
+          <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+            <h2 className="text-sm font-semibold text-gray-700">Publishing Controls</h2>
+            <span className="text-xs text-gray-500">Session {sessionId} • {term}</span>
+          </div>
+          {availableExamTypes.length === 0 ? (
+            <p className="text-xs text-gray-500">
+              Schedule an exam for this class to enable publishing.
+            </p>
+          ) : (
+            availableExamTypes.map((type) => {
+              const lock = lockInfoMap[type];
+              const published = lock?.isLocked ?? false;
+              const overrides = lock?.allowedTeacherIds ?? [];
+              const lockedAtLabel = lock?.lockedAt ? new Date(lock.lockedAt).toLocaleString() : null;
+              return (
+                <div
+                  key={type}
+                  className="rounded-md border border-gray-200 bg-white px-3 py-3 space-y-3"
+                >
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <p className="text-sm font-semibold text-gray-800">
+                        {EXAM_TYPE_LABELS[type]}
+                      </p>
+                      <p className="text-xs text-gray-500">
+                        Status: {published ? "Published" : "Draft"}
+                        {published && lockedAtLabel ? ` · ${lockedAtLabel}` : ""}
+                      </p>
+                    </div>
+                    <div className="flex gap-2">
+                      {published ? (
+                        <button
+                          type="button"
+                          className="rounded-md bg-red-500 px-3 py-1 text-xs font-medium text-white disabled:opacity-50"
+                          onClick={() => void handleLockAction(type, "unlock")}
+                          disabled={lockActionLoading[type]}
+                        >
+                          {lockActionLoading[type] ? "Processing..." : "Unpublish"}
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          className="rounded-md bg-lamaSky px-3 py-1 text-xs font-medium text-white disabled:opacity-50"
+                          onClick={() => void handleLockAction(type, "lock")}
+                          disabled={lockActionLoading[type]}
+                        >
+                          {lockActionLoading[type] ? "Processing..." : "Publish"}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  {published && (
+                    <div className="space-y-2 text-xs text-gray-600">
+                      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                        <label className="flex flex-col gap-1 sm:flex-row sm:items-center">
+                          <span className="font-semibold text-gray-700">Grant teacher access</span>
+                          <input
+                            type="number"
+                            className="mt-1 w-full rounded-md border border-gray-300 px-2 py-1 text-xs sm:ml-3 sm:w-40"
+                            value={overrideInputs[type] ?? ""}
+                            onChange={(event) =>
+                              setOverrideInputs((prev) => ({
+                                ...prev,
+                                [type]: event.target.value,
+                              }))
+                            }
+                            placeholder="Teacher ID"
+                            disabled={lockActionLoading[type]}
+                          />
+                        </label>
+                        <button
+                          type="button"
+                          className="rounded-md bg-amber-500 px-3 py-1 text-xs font-medium text-white disabled:opacity-50"
+                          onClick={() => void handleGrantOverride(type)}
+                          disabled={lockActionLoading[type]}
+                        >
+                          {lockActionLoading[type] ? "Processing..." : "Grant"}
+                        </button>
+                      </div>
+                      <div>
+                        <p className="font-semibold text-gray-700">Overrides</p>
+                        {overrides.length ? (
+                          <ul className="mt-1 flex flex-wrap gap-2">
+                            {overrides.map((id) => (
+                              <li
+                                key={id}
+                                className="flex items-center gap-1 rounded border border-gray-200 bg-gray-100 px-2 py-1"
+                              >
+                                <span>Teacher #{id}</span>
+                                <button
+                                  type="button"
+                                  className="text-xs text-red-500 hover:underline"
+                                  onClick={() => void handleRevokeOverride(type, id)}
+                                  disabled={lockActionLoading[type]}
+                                >
+                                  Remove
+                                </button>
+                              </li>
+                            ))}
+                          </ul>
+                        ) : (
+                          <p className="text-gray-500">No teacher overrides.</p>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })
+          )}
+          {lockActionError && <p className="text-xs text-red-500">{lockActionError}</p>}
+          {lockActionMessage && <p className="text-xs text-green-600">{lockActionMessage}</p>}
+        </div>
+      )}
       <div className="mt-6">
         {classError && (
           <div className="mb-4 text-sm text-red-500 border border-red-200 bg-red-50 rounded-md px-4 py-3">
@@ -265,14 +547,26 @@ const LoadScoresPage = () => {
             {loadingClasses ? (
               <div className="text-sm text-gray-500 text-center py-8">Loading scores…</div>
             ) : (
-              <ScoreEntryTable
-                rows={filteredRows}
-                examType={examType}
-                resolveGrade={resolveGrade}
-                onScoreChange={handleScoreChange}
-                onSave={handleSave}
-                isSaving={isSaving}
-              />
+              <>
+                {lockMessage && (
+                  <div
+                    className={`text-xs ${
+                      isReadOnly ? "text-red-600" : "text-gray-500"
+                    } border border-dashed border-gray-300 rounded-md px-3 py-2`}
+                  >
+                    {lockMessage}
+                  </div>
+                )}
+                <ScoreEntryTable
+                  rows={filteredRows}
+                  examType={examType}
+                  resolveGrade={resolveGrade}
+                  onScoreChange={handleScoreChange}
+                  onSave={handleSave}
+                  isSaving={isSaving}
+                  readOnly={isReadOnly}
+                />
+              </>
             )}
             {saveError && <p className="text-sm text-red-500">{saveError}</p>}
             {!saveError && saveMessage && (
@@ -290,6 +584,20 @@ const LoadScoresPage = () => {
 };
 
 export default LoadScoresPage;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
