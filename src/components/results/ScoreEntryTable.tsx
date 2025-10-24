@@ -1,6 +1,6 @@
 ﻿"use client";
 
-import { useMemo } from "react";
+import { useMemo, type ChangeEvent } from "react";
 import { type ScoreSheetRow } from "@/contexts/ResultsContext";
 import { gradeColors, type GradeSummary } from "@/lib/grades";
 
@@ -72,21 +72,38 @@ const ScoreEntryTable = ({
                       <span className="text-[10px] text-gray-400">{row.subject}</span>
                     </div>
                   </td>
-                  {row.components.map((component) => (
-                    <td key={componentKey(component.componentId)} className="px-4 py-3">
-                      <input
-                        type="number"
-                        className="w-full rounded-md border border-gray-200 px-2 py-1 text-sm disabled:bg-gray-100 disabled:text-gray-400"
-                        min={0}
-                        max={component.maxScore ?? undefined}
-                        value={component.score}
-                        disabled={readOnly}
-                        onChange={(event) =>
-                          onScoreChange(row.id, component.componentId, Number(event.target.value) || 0)
-                        }
-                      />
-                    </td>
-                  ))}
+                  {row.components.map((component) => {
+                    const isMidtermCarry =
+                      examType === "final" && component.componentId === "midtermCarry";
+                    const handleChange = (event: ChangeEvent<HTMLInputElement>) => {
+                      if (isMidtermCarry) {
+                        return;
+                      }
+                      onScoreChange(
+                        row.id,
+                        component.componentId,
+                        Number(event.target.value) || 0,
+                      );
+                    };
+                    return (
+                      <td key={componentKey(component.componentId)} className="px-4 py-3">
+                        <input
+                          type="number"
+                          className="w-full rounded-md border border-gray-200 px-2 py-1 text-sm disabled:bg-gray-100 disabled:text-gray-400"
+                          min={0}
+                          max={component.maxScore ?? undefined}
+                          value={component.score}
+                          disabled={readOnly || isMidtermCarry}
+                          title={
+                            isMidtermCarry
+                              ? "Auto-filled from midterm performance."
+                              : undefined
+                          }
+                          onChange={handleChange}
+                        />
+                      </td>
+                    );
+                  })}
                   <td className="px-4 py-3 text-center font-semibold">{totalDisplay}</td>
                   <td className="px-4 py-3 text-center text-xs">
                     <span className={`font-semibold ${gradeColor}`}>{grade.grade}</span>
