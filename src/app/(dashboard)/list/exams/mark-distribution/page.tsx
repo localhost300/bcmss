@@ -69,11 +69,10 @@ const MarkDistributionPage = () => {
   const examTypeOptions = useMemo(() => {
     const source =
       filteredDistributions.length > 0 ? filteredDistributions : distributions;
-    const types = source.map((distribution) => distribution.examType);
-    if (!types.length) {
-      types.push("final", "midterm");
-    }
-    return buildExamTypeOptions(types);
+    const typeSet = new Set(source.map((distribution) => distribution.examType));
+    typeSet.add("final");
+    typeSet.add("midterm");
+    return buildExamTypeOptions(Array.from(typeSet));
   }, [filteredDistributions, distributions]);
 
   useEffect(() => {

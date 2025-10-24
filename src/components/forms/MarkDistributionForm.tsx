@@ -89,17 +89,16 @@ const MarkDistributionForm = ({ type, data, onSuccess }: MarkDistributionFormPro
     });
 
     const source = scoped.length > 0 ? scoped : catalogue;
-    const types: DistributionType[] = source.map((distribution) => distribution.examType);
+    const typeSet = new Set<DistributionType>(source.map((distribution) => distribution.examType));
 
-    if (isDistributionType(data?.examType) && !types.includes(data.examType)) {
-      types.push(data.examType);
+    if (isDistributionType(data?.examType)) {
+      typeSet.add(data.examType);
     }
 
-    if (!types.length) {
-      types.push("final", "midterm");
-    }
+    typeSet.add("final");
+    typeSet.add("midterm");
 
-    return buildExamTypeOptions(types);
+    return buildExamTypeOptions(Array.from(typeSet));
   }, [catalogue, data?.examType, data?.sessionId, data?.term]);
 
   const initialExamType = useMemo(() => {
