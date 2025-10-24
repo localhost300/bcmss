@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import type { ExamMarkComponent, ExamMarkDistribution } from "@/lib/data";
+import type { ExamComponentId, ExamMarkComponent, ExamMarkDistribution } from "@/lib/data";
 import { buildExamTypeOptions, getExamTypeLabel } from "@/lib/exams";
 import {
   listMarkDistributions,
@@ -22,6 +22,19 @@ type MarkDistributionFormProps = {
 };
 
 type EditableComponent = ExamMarkComponent;
+
+const AVAILABLE_COMPONENTS: Array<{ id: ExamComponentId; defaultLabel: string }> = [
+  { id: "ca1", defaultLabel: "CA1" },
+  { id: "classParticipation", defaultLabel: "Class Participation" },
+  { id: "quiz", defaultLabel: "Quiz" },
+  { id: "assignment", defaultLabel: "Assignment" },
+  { id: "ca2", defaultLabel: "CA2" },
+  { id: "midtermCarry", defaultLabel: "Midterm Aggregate" },
+  { id: "exam", defaultLabel: "Exam" },
+];
+
+const findComponentMeta = (id: ExamComponentId) =>
+  AVAILABLE_COMPONENTS.find((component) => component.id === id);
 
 const cloneComponents = (components: ExamMarkComponent[] | undefined): EditableComponent[] =>
   (components ?? []).map((component) => ({
@@ -149,10 +162,67 @@ const MarkDistributionForm = ({ type, data, onSuccess }: MarkDistributionFormPro
   );
 
   const handleWeightChange = (index: number, value: string) => {
+    setError(null);
+    setSuccess(null);
+    const numeric = Number(value);
+    const safeWeight = Number.isFinite(numeric) ? Math.max(0, Math.round(numeric)) : 0;
     setComponents((prev) =>
-      prev.map((component, idx) =>
-        idx === index ? { ...component, weight: Number(value) || 0 } : component,
-      ),
+      prev.map((component, idx) => (idx === index ? { ...component, weight: safeWeight } : component)),
+    );
+  };
+
+  const handleLabelChange = (index: number, value: string) => {
+    setError(null);
+    setSuccess(null);
+    setComponents((prev) =>
+      prev.map((component, idx) => (idx === index ? { ...component, label: value } : component)),
+    );
+  };
+
+  const handleRemoveComponent = (index: number) => {
+    setError(null);
+    setSuccess(null);
+    setComponents((prev) => prev.filter((_, idx) => idx !== index));
+  };
+
+  const handleAddComponent = () => {
+    setError(null);
+    setSuccess(null);
+    const used = new Set(components.map((component) => component.id));
+    const nextMeta = AVAILABLE_COMPONENTS.find((component) => !used.has(component.id));
+    if (!nextMeta) {
+      setError("All available exam components have been added.");
+      return;
+    }
+    setComponents((prev) => [
+      ...prev,
+      {
+        id: nextMeta.id,
+        label: nextMeta.defaultLabel,
+        weight: 0,
+      },
+    ]);
+  };
+
+  const handleComponentIdChange = (index: number, value: string) => {
+    setError(null);
+    setSuccess(null);
+    const nextId = value as ExamComponentId;
+    setComponents((prev) =>
+      prev.map((component, idx) => {
+        if (idx !== index) {
+          return component;
+        }
+        const currentMeta = findComponentMeta(component.id);
+        const nextMeta = findComponentMeta(nextId);
+        const usingDefaultLabel =
+          currentMeta !== undefined && component.label.trim() === currentMeta.defaultLabel;
+        return {
+          ...component,
+          id: nextId,
+          label: usingDefaultLabel && nextMeta ? nextMeta.defaultLabel : component.label,
+        };
+      }),
     );
   };
 
@@ -163,6 +233,11 @@ const MarkDistributionForm = ({ type, data, onSuccess }: MarkDistributionFormPro
 
     if (!components.length) {
       setError("Add at least one component to distribute marks.");
+      return;
+    }
+
+    if (components.some((component) => !component.label.trim())) {
+      setError("Each component needs a label.");
       return;
     }
 
@@ -247,31 +322,79 @@ const MarkDistributionForm = ({ type, data, onSuccess }: MarkDistributionFormPro
           Components
         </span>
         <div className="flex flex-col gap-2">
-          {components.map((component, index) => (
-            <div
-              key={component.id}
-              className="grid grid-cols-1 gap-2 rounded-md border border-gray-200 p-3 md:grid-cols-[1fr_120px]"
-            >
-              <div className="text-sm font-medium text-gray-700">{component.label}</div>
-              <label className="flex flex-col gap-1 text-xs text-gray-500">
-                <span>Weight</span>
-                <input
-                  type="number"
-                  className="rounded-md border border-gray-200 p-2 text-sm"
-                  min={0}
-                  step={1}
-                  value={Number.isFinite(component.weight) ? component.weight : 0}
-                  onChange={(event) => handleWeightChange(index, event.target.value)}
-                />
-              </label>
-            </div>
-          ))}
+          {components.map((component, index) => {
+            const usedIds = components.map((item) => item.id);
+            return (
+              <div
+                key={`${component.id}-${index}`}
+                className="grid grid-cols-1 gap-2 rounded-md border border-gray-200 p-3 md:grid-cols-[160px_1fr_120px_40px]"
+              >
+                <label className="flex flex-col gap-1 text-xs text-gray-500">
+                  <span>Component</span>
+                  <select
+                    className="rounded-md border border-gray-200 p-2 text-sm"
+                    value={component.id}
+                    onChange={(event) => handleComponentIdChange(index, event.target.value)}
+                  >
+                    {AVAILABLE_COMPONENTS.map((option) => (
+                      <option
+                        key={option.id}
+                        value={option.id}
+                        disabled={
+                          option.id !== component.id && usedIds.includes(option.id)
+                        }
+                      >
+                        {option.defaultLabel}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="flex flex-col gap-1 text-xs text-gray-500">
+                  <span>Label</span>
+                  <input
+                    type="text"
+                    className="rounded-md border border-gray-200 p-2 text-sm"
+                    value={component.label}
+                    onChange={(event) => handleLabelChange(index, event.target.value)}
+                    placeholder="e.g. Continuous Assessment"
+                  />
+                </label>
+                <label className="flex flex-col gap-1 text-xs text-gray-500">
+                  <span>Weight</span>
+                  <input
+                    type="number"
+                    className="rounded-md border border-gray-200 p-2 text-sm"
+                    min={0}
+                    step={1}
+                    value={Number.isFinite(component.weight) ? component.weight : 0}
+                    onChange={(event) => handleWeightChange(index, event.target.value)}
+                  />
+                </label>
+                <div className="flex items-end md:justify-end">
+                  <button
+                    type="button"
+                    className="rounded-md border border-gray-200 px-3 py-1 text-xs font-medium text-gray-600 hover:bg-gray-100"
+                    onClick={() => handleRemoveComponent(index)}
+                  >
+                    Remove
+                  </button>
+                </div>
+              </div>
+            );
+          })}
           {!components.length && (
             <div className="rounded-md border border-dashed border-gray-300 p-4 text-center text-xs text-gray-500">
               No components configured for this exam type yet.
             </div>
           )}
         </div>
+        <button
+          type="button"
+          className="self-start rounded-md border border-gray-200 px-3 py-2 text-xs font-medium text-gray-600 hover:bg-gray-100"
+          onClick={handleAddComponent}
+        >
+          Add component
+        </button>
         <div className="text-xs text-gray-500">
           Total weight: <span className="font-semibold text-gray-700">{totalWeight}</span>
         </div>

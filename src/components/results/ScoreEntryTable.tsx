@@ -2,7 +2,7 @@
 
 import { useMemo } from "react";
 import { type ScoreSheetRow } from "@/contexts/ResultsContext";
-import { type GradeSummary } from "@/lib/grades";
+import { gradeColors, type GradeSummary } from "@/lib/grades";
 
 export type ScoreEntryTableProps = {
   rows: ScoreSheetRow[];
@@ -59,6 +59,7 @@ const ScoreEntryTable = ({
           <tbody>
             {rows.map((row) => {
               const grade = resolveGrade(row);
+              const gradeColor = gradeColors[grade.grade] ?? "text-gray-600";
               const totalDisplay = examType === "midterm"
                 ? row.totalScore + " / " + row.maxScore
                 : row.percentage + "%";
@@ -88,7 +89,7 @@ const ScoreEntryTable = ({
                   ))}
                   <td className="px-4 py-3 text-center font-semibold">{totalDisplay}</td>
                   <td className="px-4 py-3 text-center text-xs">
-                    <span className="font-semibold">{grade.grade}</span>
+                    <span className={`font-semibold ${gradeColor}`}>{grade.grade}</span>
                     <span className="block text-[10px] text-gray-400">{grade.remark}</span>
                   </td>
                 </tr>
