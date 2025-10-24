@@ -871,11 +871,11 @@ export const ResultsProvider = ({ children }: ResultsProviderProps) => {
             });
 
             if (placeholderRawRecords.length) {
-              const alignedPlaceholders = alignRecordsWithMarkDistributions(
-                placeholderRawRecords,
+              const combinedRecords = alignRecordsWithMarkDistributions(
+                [...records, ...placeholderRawRecords],
                 markDistributions,
               );
-              records = [...records, ...alignedPlaceholders];
+              records = combinedRecords;
             }
           }
         }
