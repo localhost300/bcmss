@@ -8,6 +8,7 @@ import { z } from "zod";
 import { useSchool, useSchoolScope } from "@/contexts/SchoolContext";
 import { getJSON, postJSON } from "@/lib/utils/api";
 import InputField from "../InputField";
+import PhotoUploader from "./PhotoUploader";
 
 const categories = ["Science", "Art", "Commercial", "Humanities", "Technical", "General"] as const;
 const bloodTypes = ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"] as const;
@@ -17,11 +18,7 @@ const schema = z.object({
   name: z.string().min(1, { message: "Student name is required!" }),
   email: z.string().email({ message: "Please enter a valid email!" }).optional(),
   address: z.string().min(1, { message: "Address is required!" }),
-  photo: z
-    .string()
-    .url({ message: "Photo must be a valid URL" })
-    .optional()
-    .or(z.literal("")),
+  photo: z.string().trim().optional().nullable(),
   dateOfBirth: z.string().min(1, { message: "Date of birth is required!" }),
   bloodType: z.enum(bloodTypes, { message: "Select a blood type" }),
   grade: z.coerce
@@ -84,7 +81,8 @@ const StudentForm = ({ type, data, id, onSuccess }: StudentFormProps) => {
       name: data?.name ?? "",
       email: data?.email ?? "",
       address: data?.address ?? "",
-      photo: data?.photo ?? "",
+      photo:
+        typeof data?.photo === "string" && data.photo.trim().length > 0 ? data.photo : null,
       dateOfBirth: data?.dateOfBirth ? data.dateOfBirth.slice(0, 10) : "",
       bloodType: (data?.bloodType as Inputs["bloodType"]) ?? bloodTypes[0],
       grade: data?.grade ?? 1,
@@ -301,12 +299,16 @@ const StudentForm = ({ type, data, id, onSuccess }: StudentFormProps) => {
       return;
     }
 
+    const rawPhoto = formData.photo;
+    const normalisedPhoto =
+      typeof rawPhoto === "string" && rawPhoto.trim().length > 0 ? rawPhoto.trim() : null;
+
     const payload: Record<string, unknown> = {
       studentId: formData.studentId.trim(),
       name: formData.name.trim(),
       email: formData.email?.trim() ?? "",
       address: formData.address?.trim() ?? "",
-      photo: formData.photo?.trim() ?? "",
+      photo: normalisedPhoto,
       dateOfBirth: formData.dateOfBirth,
       bloodType: formData.bloodType,
       grade: formData.grade,
@@ -352,7 +354,7 @@ const StudentForm = ({ type, data, id, onSuccess }: StudentFormProps) => {
           name: "",
           email: "",
           address: "",
-          photo: "",
+          photo: null,
           dateOfBirth: "",
           bloodType: bloodTypes[0],
           grade: 1,
@@ -444,12 +446,23 @@ const StudentForm = ({ type, data, id, onSuccess }: StudentFormProps) => {
           register={register}
           error={errors.address}
         />
-        <InputField
-          label="Photo URL"
+        <Controller
+          control={control}
           name="photo"
-          defaultValue={defaultValues.photo}
-          register={register}
-          error={errors.photo}
+          render={({ field }) => (
+            <PhotoUploader
+              label="Photo"
+              value={
+                typeof field.value === "string" && field.value.trim().length > 0
+                  ? field.value
+                  : null
+              }
+              onChange={(value) => field.onChange(value ?? null)}
+              disabled={submitting}
+              helperText="JPEG, PNG, WEBP or GIF up to 5MB."
+              error={errors.photo?.message?.toString() ?? null}
+            />
+          )}
         />
       </div>
 

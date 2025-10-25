@@ -9,7 +9,7 @@ type PaginationParams = {
   pageSize?: number;
 };
 
-type SaveStudentInput = {
+export type SaveStudentInput = {
   studentCode: string;
   name: string;
   email?: string | null;
@@ -35,6 +35,24 @@ type ListStudentsFilters = PaginationParams & {
   schoolId?: string;
   category?: string;
   classId?: number;
+};
+
+export type StudentImportRow = {
+  rowNumber: number;
+  input: SaveStudentInput;
+};
+
+export type StudentImportError = {
+  row: number;
+  message: string;
+};
+
+export type StudentImportResult = {
+  created: number;
+  updated: number;
+  skipped: number;
+  errors: StudentImportError[];
+  skippedRows: StudentImportError[];
 };
 
 export type StudentListItem = {
@@ -78,6 +96,41 @@ const sanitizePaging = ({ page, pageSize }: PaginationParams = {}): { page: numb
   const safePageSize = Math.min(Math.max(pageSize ?? DEFAULT_PAGE_SIZE, 1), MAX_PAGE_SIZE);
   const safePage = Math.max(page ?? 1, 1);
   return { page: safePage, pageSize: safePageSize };
+};
+
+const buildStudentWhere = (filters: ListStudentsFilters): Prisma.StudentWhereInput => {
+  const { search, schoolId, category, classId } = filters;
+  const where: Prisma.StudentWhereInput = {};
+
+  if (search && search.trim()) {
+    const query = search.trim();
+    where.OR = [
+      { studentCode: { contains: query, mode: "insensitive" } },
+      { name: { contains: query, mode: "insensitive" } },
+      { email: { contains: query, mode: "insensitive" } },
+      { phone: { contains: query, mode: "insensitive" } },
+      { guardianEmail: { contains: query, mode: "insensitive" } },
+      { bloodType: { contains: query, mode: "insensitive" } },
+      { className: { contains: query, mode: "insensitive" } },
+    ];
+  }
+
+  if (schoolId && schoolId.trim()) {
+    where.schoolId = schoolId.trim();
+  }
+
+  if (category && category.trim()) {
+    const normalised = category.trim().toUpperCase();
+    if (normalised in StudentCategory) {
+      where.category = normalised as StudentCategory;
+    }
+  }
+
+  if (typeof classId === "number" && Number.isFinite(classId)) {
+    where.classId = classId;
+  }
+
+  return where;
 };
 
 const normaliseOptional = (value?: string | null): string | null => {
@@ -165,37 +218,7 @@ const mapStudentRecord = (record: StudentWithRelations): StudentDetail => {
 
 export async function listStudents(filters: ListStudentsFilters = {}): Promise<ListStudentsResult> {
   const { page, pageSize } = sanitizePaging(filters);
-  const { search, schoolId, category, classId } = filters;
-
-  const where: Prisma.StudentWhereInput = {};
-
-  if (search && search.trim()) {
-    const query = search.trim();
-    where.OR = [
-      { studentCode: { contains: query, mode: "insensitive" } },
-      { name: { contains: query, mode: "insensitive" } },
-      { email: { contains: query, mode: "insensitive" } },
-      { phone: { contains: query, mode: "insensitive" } },
-      { guardianEmail: { contains: query, mode: "insensitive" } },
-      { bloodType: { contains: query, mode: "insensitive" } },
-      { className: { contains: query, mode: "insensitive" } },
-    ];
-  }
-
-  if (schoolId && schoolId.trim()) {
-    where.schoolId = schoolId.trim();
-  }
-
-  if (category && category.trim()) {
-    const normalised = category.trim().toUpperCase();
-    if (normalised in StudentCategory) {
-      where.category = normalised as StudentCategory;
-    }
-  }
-
-  if (typeof classId === "number" && Number.isFinite(classId)) {
-    where.classId = classId;
-  }
+  const where = buildStudentWhere(filters);
 
   const skip = (page - 1) * pageSize;
 
@@ -468,3 +491,105 @@ const resolveClass = async (
 
   return { classId: schoolClass.id, className: schoolClass.name };
 };
+
+export async function exportStudents(filters: ListStudentsFilters = {}): Promise<StudentDetail[]> {
+  const where = buildStudentWhere(filters);
+  const records = await prisma.student.findMany({
+    where,
+    orderBy: [{ name: "asc" }, { studentCode: "asc" }],
+    select: studentSelect,
+  });
+
+  return records.map(mapStudentRecord);
+}
+
+export async function importStudents(rows: StudentImportRow[]): Promise<StudentImportResult> {
+  if (!rows.length) {
+    return { created: 0, updated: 0, skipped: 0, errors: [], skippedRows: [] };
+  }
+
+  let created = 0;
+  let updated = 0;
+  let skipped = 0;
+  const errors: StudentImportError[] = [];
+  const skippedRows: StudentImportError[] = [];
+
+  await prisma.$transaction(async (tx) => {
+    for (const row of rows) {
+      const { rowNumber, input } = row;
+
+      try {
+        const studentCode = input.studentCode.trim();
+        if (!studentCode) {
+          throw new NotFoundError("Student identifier is required.");
+        }
+
+        const { classId, className } = await resolveClass(tx, input.className, input.schoolId);
+        const guardian = await resolveGuardian(tx, input);
+
+        const existing = await tx.student.findUnique({
+          where: { studentCode },
+          select: { id: true },
+        });
+
+        if (!existing) {
+          skipped += 1;
+          skippedRows.push({
+            row: rowNumber,
+            message: `Student with ID "${studentCode}" does not exist and was skipped.`,
+          });
+          continue;
+        }
+
+        await tx.student.update({
+          where: { id: existing.id },
+          data: {
+            studentCode,
+            name: input.name.trim(),
+            email: normaliseOptional(input.email),
+            address: normaliseOptional(input.address),
+            photo: normaliseOptional(input.photo),
+            grade: input.grade,
+            category: mapCategory(input.category),
+            classId,
+            className,
+            schoolId: input.schoolId.trim(),
+            guardianName: guardian.name ?? normaliseOptional(input.guardianName),
+            guardianPhone: guardian.phone ?? normaliseOptional(input.guardianPhone),
+            guardianEmail: guardian.email ?? normaliseOptional(input.guardianEmail),
+            dateOfBirth: input.dateOfBirth ?? null,
+            bloodType: normaliseBloodType(input.bloodType),
+          },
+        });
+
+        await tx.studentParent.deleteMany({ where: { studentId: existing.id } });
+
+        if (guardian.parentId) {
+          await tx.studentParent.create({
+            data: {
+              studentId: existing.id,
+              parentId: guardian.parentId,
+              relationship: normaliseOptional(input.guardianRelationship),
+            },
+          });
+        }
+
+        updated += 1;
+      } catch (error) {
+        const message =
+          error instanceof NotFoundError
+            ? error.message
+            : error instanceof Error
+            ? error.message
+            : "Unknown error while importing row.";
+
+        errors.push({
+          row: rowNumber,
+          message,
+        });
+      }
+    }
+  });
+
+  return { created, updated, skipped, errors, skippedRows };
+}

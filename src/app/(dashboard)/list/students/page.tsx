@@ -1,6 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ChangeEvent,
+} from "react";
 import Image from "next/image";
 import Link from "next/link";
 
@@ -40,6 +47,17 @@ type StudentListResponse = {
     totalItems: number;
     totalPages: number;
   };
+};
+
+type ImportSummary = {
+  totalRows: number;
+  processedRows: number;
+  created: number;
+  updated: number;
+  skipped: number;
+  failed: number;
+  errors: Array<{ row: number; message: string }>;
+  skippedRows: Array<{ row: number; message: string }>;
 };
 
 const columns = [
@@ -82,6 +100,17 @@ const StudentListPage = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [importing, setImporting] = useState(false);
+  const [importSummary, setImportSummary] = useState<ImportSummary | null>(null);
+  const [importError, setImportError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const visibleImportIssues = useMemo(() => {
+    if (!importSummary) {
+      return [];
+    }
+    const combined = [...importSummary.errors, ...importSummary.skippedRows];
+    return combined.slice(0, 5);
+  }, [importSummary]);
 
   useEffect(() => {
     if (!isAdmin) {
@@ -154,6 +183,104 @@ const StudentListPage = () => {
     setRefreshKey((value) => value + 1);
   }, []);
 
+  const handleImportButtonClick = useCallback(() => {
+    fileInputRef.current?.click();
+  }, []);
+
+  const handleImportFileChange = useCallback(
+    async (event: ChangeEvent<HTMLInputElement>) => {
+      const file = event.target.files?.[0];
+      if (!file) {
+        return;
+      }
+
+      setImporting(true);
+      setImportSummary(null);
+      setImportError(null);
+
+      try {
+        const formData = new FormData();
+        formData.append("file", file);
+        if (schoolScope) {
+          formData.append("defaultSchoolId", schoolScope);
+        }
+
+        const response = await fetch("/api/students/import", {
+          method: "POST",
+          body: formData,
+        });
+
+        let payload: unknown = null;
+        try {
+          payload = await response.json();
+        } catch (parseError) {
+          payload = null;
+        }
+
+        const data =
+          payload && typeof payload === "object" ? (payload as Record<string, unknown>) : {};
+
+        if (!response.ok) {
+          const message =
+            typeof data.message === "string" ? data.message : "Unable to import students.";
+          const missingColumns = Array.isArray(data.missingColumns)
+            ? (data.missingColumns as unknown[])
+                .filter((value): value is string => typeof value === "string")
+            : [];
+          const missingSuffix =
+            missingColumns.length > 0 ? ` Missing columns: ${missingColumns.join(", ")}.` : "";
+          setImportError(message + missingSuffix);
+          return;
+        }
+
+        const summary =
+          data.summary && typeof data.summary === "object"
+            ? (data.summary as Partial<ImportSummary>)
+            : undefined;
+
+        setImportSummary({
+          totalRows: summary?.totalRows ?? 0,
+          processedRows: summary?.processedRows ?? 0,
+          created: summary?.created ?? 0,
+          updated: summary?.updated ?? 0,
+          skipped: summary?.skipped ?? 0,
+          failed: summary?.failed ?? 0,
+          errors: summary?.errors ?? [],
+          skippedRows: summary?.skippedRows ?? [],
+        });
+
+        handleRefresh();
+      } catch (importError) {
+        const message =
+          importError instanceof Error ? importError.message : "Unable to import students.";
+        setImportError(message);
+      } finally {
+        setImporting(false);
+        event.target.value = "";
+      }
+    },
+    [handleRefresh, schoolScope],
+  );
+
+  const handleExport = useCallback(() => {
+    const params = new URLSearchParams();
+    if (searchTerm.trim()) {
+      params.set("search", searchTerm.trim());
+    }
+    if (schoolScope) {
+      params.set("schoolId", schoolScope);
+    }
+
+    const query = params.toString();
+    const url = query ? `/api/students/export?${query}` : "/api/students/export";
+    window.location.href = url;
+  }, [schoolScope, searchTerm]);
+
+  const handleDismissFeedback = useCallback(() => {
+    setImportError(null);
+    setImportSummary(null);
+  }, []);
+
   const renderRow = useCallback(
     (item: StudentRow) => (
       <tr
@@ -215,6 +342,73 @@ const StudentListPage = () => {
 
   return (
     <div className="bg-white p-4 rounded-md flex-1 m-4 mt-0">
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".csv,text/csv"
+        className="hidden"
+        onChange={handleImportFileChange}
+      />
+
+      {importError && (
+        <div className="mb-4 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-600">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <p className="font-medium">Import failed</p>
+              <p className="mt-1 text-xs text-red-500">{importError}</p>
+            </div>
+            <button
+              type="button"
+              onClick={handleDismissFeedback}
+              className="rounded-md px-2 py-1 text-xs font-medium text-red-600 hover:bg-red-100"
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
+
+      {importSummary && (
+        <div className="mb-4 rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-700">
+          <div className="flex items-start justify-between gap-4">
+            <div className="space-y-1">
+              <p className="font-medium">Import complete</p>
+              <p className="text-xs text-emerald-600">
+                Processed {importSummary.processedRows} of {importSummary.totalRows} rows. Created{" "}
+                {importSummary.created}, updated {importSummary.updated}, skipped {importSummary.skipped}, failed{" "}
+                {importSummary.failed}.
+              </p>
+              {visibleImportIssues.length > 0 && (
+                <ul className="mt-2 space-y-1 text-xs text-red-600">
+                  {visibleImportIssues.map((item) => (
+                    <li key={item.row}>
+                      Row {item.row}: {item.message}
+                    </li>
+                  ))}
+                  {importSummary.errors.length + importSummary.skippedRows.length >
+                    visibleImportIssues.length && (
+                    <li>
+                      +{" "}
+                      {importSummary.errors.length +
+                        importSummary.skippedRows.length -
+                        visibleImportIssues.length}{" "}
+                      additional issues. See server logs for details.
+                    </li>
+                  )}
+                </ul>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={handleDismissFeedback}
+              className="rounded-md px-2 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-100"
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="flex items-center justify-between">
         <h1 className="hidden md:block text-lg font-semibold">All Students</h1>
         <div className="flex flex-col md:flex-row items-center gap-4 w-full md:w-auto">
@@ -229,6 +423,23 @@ const StudentListPage = () => {
             </button>
             <button className="w-8 h-8 flex items-center justify-center rounded-full bg-lamaYellow">
               <Image src="/sort.png" alt="" width={14} height={14} />
+            </button>
+            <button
+              type="button"
+              onClick={handleExport}
+              className="h-8 px-3 rounded-full bg-lamaSky text-white text-xs font-medium hover:bg-lamaSkyLight transition-colors"
+            >
+              Export
+            </button>
+            <button
+              type="button"
+              onClick={handleImportButtonClick}
+              className="w-8 h-8 flex items-center justify-center rounded-full bg-lamaPurple text-white hover:bg-lamaPurpleLight disabled:cursor-not-allowed disabled:opacity-60 transition-colors"
+              title={importing ? "Importing students..." : "Import students from CSV"}
+              disabled={importing}
+            >
+              <Image src="/upload.png" alt="" width={16} height={16} />
+              <span className="sr-only">Import students</span>
             </button>
             <FormModal table="student" type="create" onSuccess={handleRefresh} />
           </div>

@@ -8,6 +8,7 @@ import { z } from "zod";
 import { useSchool, useSchoolScope } from "@/contexts/SchoolContext";
 import { postJSON } from "@/lib/utils/api";
 import InputField from "../InputField";
+import PhotoUploader from "./PhotoUploader";
 
 const schema = z.object({
   teacherId: z.string().min(1, { message: "Teacher ID is required!" }),
@@ -15,11 +16,7 @@ const schema = z.object({
   email: z.string().email({ message: "Invalid email address!" }),
   phone: z.string().min(1, { message: "Phone is required!" }),
   address: z.string().min(1, { message: "Address is required!" }),
-  photo: z
-    .string()
-    .url({ message: "Photo must be a valid URL!" })
-    .optional()
-    .or(z.literal("")),
+  photo: z.string().trim().optional().nullable(),
   schoolId: z.string().min(1, { message: "Select a campus" }),
 });
 
@@ -54,7 +51,7 @@ const TeacherForm = ({ type, data, id, onSuccess }: TeacherFormProps) => {
       email: data?.email ?? "",
       phone: data?.phone ?? "",
       address: data?.address ?? "",
-      photo: data?.photo ?? "",
+      photo: data?.photo ?? null,
       schoolId: data?.schoolId ?? (canSwitch ? activeSchoolId : scopeId),
     }),
     [data, activeSchoolId, scopeId, canSwitch],
@@ -86,9 +83,15 @@ const TeacherForm = ({ type, data, id, onSuccess }: TeacherFormProps) => {
       return;
     }
 
+    const rawPhoto = formData.photo;
+    const normalisedPhoto =
+      typeof rawPhoto === "string" && rawPhoto.trim().length > 0
+        ? rawPhoto.trim()
+        : null;
+
     const payload: Record<string, unknown> = {
       ...formData,
-      photo: formData.photo?.trim() ?? "",
+      photo: normalisedPhoto,
       action: type,
     };
 
@@ -108,7 +111,7 @@ const TeacherForm = ({ type, data, id, onSuccess }: TeacherFormProps) => {
           email: "",
           phone: "",
           address: "",
-          photo: "",
+          photo: null,
           schoolId: canSwitch ? activeSchoolId : scopeId,
         });
       }
@@ -164,12 +167,19 @@ const TeacherForm = ({ type, data, id, onSuccess }: TeacherFormProps) => {
           register={register}
           error={errors.address}
         />
-        <InputField
-          label="Photo URL"
+        <Controller
+          control={control}
           name="photo"
-          defaultValue={defaultValues.photo}
-          register={register}
-          error={errors.photo}
+          render={({ field }) => (
+            <PhotoUploader
+              label="Photo"
+              value={typeof field.value === "string" ? field.value : null}
+              onChange={(value) => field.onChange(value ?? null)}
+              disabled={submitting}
+              helperText="JPEG, PNG, WEBP or GIF up to 5MB."
+              error={errors.photo?.message?.toString() ?? null}
+            />
+          )}
         />
         <div className="flex flex-col gap-2 w-full md:w-1/3">
           <label className="text-xs text-gray-500">Campus</label>
@@ -214,4 +224,3 @@ const TeacherForm = ({ type, data, id, onSuccess }: TeacherFormProps) => {
 };
 
 export default TeacherForm;
-

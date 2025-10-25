@@ -1,10 +1,9 @@
 import Announcements from "@/components/Announcements";
-import AttendanceChart from "@/components/AttendanceChart";
-import CountChart from "@/components/CountChart";
-import EventCalendar from "@/components/EventCalendar";
-import FinanceChart from "@/components/FinanceChart";
 import AdminOverviewCards from "@/components/AdminOverviewCards";
 import ExamQuickLinks from "@/components/dashboard/ExamQuickLinks";
+import PerformanceInsights from "@/components/dashboard/PerformanceInsights";
+import UpcomingBirthdays from "@/components/dashboard/UpcomingBirthdays";
+import EventCalendar from "@/components/EventCalendar";
 
 const AdminPage = () => {
   return (
@@ -15,24 +14,12 @@ const AdminPage = () => {
         <AdminOverviewCards />
         {/* EXAM LINKS */}
         <ExamQuickLinks />
-        {/* MIDDLE CHARTS */}
-        <div className="flex gap-4 flex-col lg:flex-row">
-          {/* COUNT CHART */}
-          <div className="w-full lg:w-1/3 h-[450px]">
-            <CountChart />
-          </div>
-          {/* ATTENDANCE CHART */}
-          <div className="w-full lg:w-2/3 h-[450px]">
-            <AttendanceChart />
-          </div>
-        </div>
-        {/* BOTTOM CHART */}
-        <div className="w-full h-[500px]">
-          <FinanceChart />
-        </div>
+        {/* PERFORMANCE INSIGHTS */}
+        <PerformanceInsights />
       </div>
       {/* RIGHT */}
       <div className="w-full lg:w-1/3 flex flex-col gap-8">
+        <UpcomingBirthdays />
         <EventCalendar />
         <Announcements />
       </div>

@@ -2,6 +2,7 @@
 
 import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from "react";
 import { patchJSON, postJSON } from "@/lib/utils/api";
+import PhotoUploader from "./PhotoUploader";
 
 type SchoolFormState = {
   id?: string;
@@ -15,7 +16,7 @@ type SchoolFormState = {
   email: string;
   principal: string;
   established: string;
-  logo: string;
+  logo: string | null;
 };
 
 type ApiSchool = {
@@ -51,7 +52,7 @@ const defaultState: SchoolFormState = {
   email: "",
   principal: "",
   established: "",
-  logo: "",
+  logo: null,
 };
 
 const SchoolForm = ({ type, data, onSuccess }: SchoolFormProps) => {
@@ -89,7 +90,10 @@ const SchoolForm = ({ type, data, onSuccess }: SchoolFormProps) => {
       email: formState.email.trim(),
       principal: formState.principal.trim(),
       established: formState.established.trim(),
-      logo: formState.logo.trim() || null,
+      logo:
+        typeof formState.logo === "string" && formState.logo.trim().length > 0
+          ? formState.logo.trim()
+          : null,
     };
 
     try {
@@ -138,7 +142,6 @@ const SchoolForm = ({ type, data, onSuccess }: SchoolFormProps) => {
     { name: "city", label: "City" },
     { name: "state", label: "State" },
     { name: "country", label: "Country" },
-    { name: "logo", label: "Logo URL", type: "url" },
   ];
 
   return (
@@ -168,13 +171,21 @@ const SchoolForm = ({ type, data, onSuccess }: SchoolFormProps) => {
             <input
               value={(formState[field.name] as string) ?? ""}
               onChange={updateField(field.name)}
-              required={field.name !== "logo"}
+              required
               className="rounded-md p-2 text-sm ring-[1.5px] ring-gray-300"
               type={field.type ?? "text"}
             />
           </label>
         ))}
       </div>
+
+      <PhotoUploader
+        label="School Logo"
+        value={formState.logo}
+        onChange={(value) => setFormState((prev) => ({ ...prev, logo: value }))}
+        helperText="Optional • JPEG, PNG, WEBP or GIF up to 5MB."
+        disabled={submitting}
+      />
 
       <div className="flex flex-col gap-2">
         {errorMessage && <p className="text-sm text-red-500">{errorMessage}</p>}
