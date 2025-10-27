@@ -126,6 +126,12 @@ const baseMenuSections: MenuSection[] = [
         ],
       },
       {
+        icon: "/attendance.png",
+        label: "Trait Ratings",
+        href: "/traits",
+        visible: ["admin", "teacher"],
+      },
+      {
         icon: "/event.png",
         label: "Events",
         href: "/list/events",
