@@ -299,8 +299,7 @@ CREATE UNIQUE INDEX "School_code_key" ON "School"("code");
 -- CreateIndex
 CREATE UNIQUE INDEX "SchoolManager_userId_schoolId_key" ON "SchoolManager"("userId", "schoolId");
 
--- CreateIndex
-CREATE UNIQUE INDEX "Teacher_teacherCode_key" ON "Teacher"("teacherCode");
+CREATE UNIQUE INDEX "Teacher_schoolId_teacherCode_key" ON "Teacher"("schoolId", "teacherCode");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "Teacher_userId_key" ON "Teacher"("userId");

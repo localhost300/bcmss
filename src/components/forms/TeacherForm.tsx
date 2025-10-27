@@ -1,12 +1,12 @@
 "use client";
 
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Controller, useForm } from "react-hook-form";
 import { z } from "zod";
 
 import { useSchool, useSchoolScope } from "@/contexts/SchoolContext";
-import { postJSON } from "@/lib/utils/api";
+import { getJSON, postJSON } from "@/lib/utils/api";
 import InputField from "../InputField";
 import PhotoUploader from "./PhotoUploader";
 
@@ -29,6 +29,32 @@ type TeacherFormProps = {
   onSuccess?: (payload?: unknown) => Promise<void> | void;
 };
 
+type TeacherListResponse = {
+  items: Array<{
+    id: number;
+    teacherId: string;
+    name: string;
+    email: string | null;
+    phone: string | null;
+    address: string | null;
+    photo: string | null;
+    schoolId: string;
+    schoolName: string;
+  }>;
+};
+
+type ExistingTeacherOption = {
+  id: number;
+  teacherCode: string;
+  fullName: string;
+  email: string | null;
+  phone: string | null;
+  address: string | null;
+  photo: string | null;
+  schoolName: string;
+  schoolId: string;
+};
+
 const TeacherForm = ({ type, data, id, onSuccess }: TeacherFormProps) => {
   const { activeSchoolId, schools, canSwitch } = useSchool();
   const scopeId = useSchoolScope();
@@ -36,25 +62,43 @@ const TeacherForm = ({ type, data, id, onSuccess }: TeacherFormProps) => {
   const [submitting, setSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [mode, setMode] = useState<"new" | "existing">(type === "create" ? "new" : "new");
+  const [existingTeachers, setExistingTeachers] = useState<ExistingTeacherOption[]>([]);
+  const [existingLoading, setExistingLoading] = useState(false);
+  const [existingError, setExistingError] = useState<string | null>(null);
+  const [selectedExistingId, setSelectedExistingId] = useState<number | "">("");
 
   const availableSchools = useMemo(
     () => (canSwitch ? schools : schools.filter((school) => school.id === scopeId)),
     [canSwitch, schools, scopeId],
   );
 
+  const baseNewValues = useMemo(
+    () => ({
+      teacherId: "",
+      name: "",
+      email: "",
+      phone: "",
+      address: "",
+      photo: null as string | null,
+      schoolId: canSwitch ? activeSchoolId : scopeId,
+    }),
+    [activeSchoolId, canSwitch, scopeId],
+  );
+
   const entityId = (data as any)?.id ?? id;
 
   const defaultValues = useMemo(
     () => ({
-      teacherId: data?.teacherId ?? "",
-      name: data?.name ?? "",
-      email: data?.email ?? "",
-      phone: data?.phone ?? "",
-      address: data?.address ?? "",
-      photo: data?.photo ?? null,
-      schoolId: data?.schoolId ?? (canSwitch ? activeSchoolId : scopeId),
+      teacherId: data?.teacherId ?? baseNewValues.teacherId,
+      name: data?.name ?? baseNewValues.name,
+      email: data?.email ?? baseNewValues.email,
+      phone: data?.phone ?? baseNewValues.phone,
+      address: data?.address ?? baseNewValues.address,
+      photo: data?.photo ?? baseNewValues.photo,
+      schoolId: data?.schoolId ?? baseNewValues.schoolId,
     }),
-    [data, activeSchoolId, scopeId, canSwitch],
+    [data, baseNewValues],
   );
 
   const {
@@ -63,6 +107,7 @@ const TeacherForm = ({ type, data, id, onSuccess }: TeacherFormProps) => {
     handleSubmit,
     formState: { errors },
     reset,
+    getValues,
   } = useForm<Inputs>({
     resolver: zodResolver(schema),
     defaultValues,
@@ -71,6 +116,120 @@ const TeacherForm = ({ type, data, id, onSuccess }: TeacherFormProps) => {
   useEffect(() => {
     reset(defaultValues);
   }, [defaultValues, reset]);
+
+  const fetchExistingTeachers = useCallback(async () => {
+    try {
+      setExistingLoading(true);
+      setExistingError(null);
+
+      const response = await getJSON<TeacherListResponse>("/api/teachers?pageSize=200");
+      const options = Array.isArray(response?.items)
+        ? response.items.map((item) => ({
+            id: item.id,
+            teacherCode: item.teacherId,
+            fullName: item.name,
+            email: item.email,
+            phone: item.phone,
+            address: item.address,
+            photo: item.photo,
+            schoolName: item.schoolName,
+            schoolId: item.schoolId,
+          }))
+        : [];
+
+      setExistingTeachers(options);
+    } catch (error) {
+      setExistingError(
+        error instanceof Error ? error.message : "Unable to load existing teachers.",
+      );
+    } finally {
+      setExistingLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (type !== "create") {
+      return;
+    }
+    if (mode !== "existing") {
+      return;
+    }
+    if (existingTeachers.length > 0 || existingLoading) {
+      return;
+    }
+    void fetchExistingTeachers();
+  }, [type, mode, existingTeachers.length, existingLoading, fetchExistingTeachers]);
+
+  useEffect(() => {
+    if (type !== "create" || mode !== "existing") {
+      return;
+    }
+    if (typeof selectedExistingId !== "number") {
+      return;
+    }
+    const match = existingTeachers.find((teacher) => teacher.id === selectedExistingId);
+    if (!match) {
+      return;
+    }
+
+    const currentSchoolId =
+      getValues("schoolId") || (canSwitch ? activeSchoolId : scopeId) || baseNewValues.schoolId;
+
+    reset({
+      teacherId: match.teacherCode,
+      name: match.fullName || match.teacherCode,
+      email: match.email ?? "",
+      phone: match.phone ?? "",
+      address: match.address ?? "",
+      photo: match.photo ?? null,
+      schoolId: currentSchoolId,
+    });
+  }, [
+    type,
+    mode,
+    selectedExistingId,
+    existingTeachers,
+    reset,
+    getValues,
+    canSwitch,
+    activeSchoolId,
+    scopeId,
+    baseNewValues.schoolId,
+  ]);
+
+  const handleModeChange = (target: "new" | "existing") => {
+    setMode(target);
+    if (target === "new") {
+      setSelectedExistingId("");
+      const currentValues = getValues();
+      reset({
+        ...baseNewValues,
+        schoolId: currentValues.schoolId || baseNewValues.schoolId,
+      });
+    }
+  };
+
+  const handleSelectExisting = (value: string) => {
+    if (!value) {
+      setSelectedExistingId("");
+      const currentValues = getValues();
+      reset({
+        teacherId: "",
+        name: "",
+        email: "",
+        phone: "",
+        address: "",
+        photo: null,
+        schoolId: currentValues.schoolId || baseNewValues.schoolId,
+      });
+      return;
+    }
+
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) {
+      setSelectedExistingId(parsed);
+    }
+  };
 
   const onSubmit = handleSubmit(async (formData) => {
     setErrorMessage(null);
@@ -129,6 +288,73 @@ const TeacherForm = ({ type, data, id, onSuccess }: TeacherFormProps) => {
       <h1 className="text-xl font-semibold">
         {type === "create" ? "Create a new teacher" : "Update teacher"}
       </h1>
+
+      {type === "create" && (
+        <div className="flex flex-col gap-3 rounded-md border border-gray-200 bg-gray-50 p-4 text-sm text-gray-600">
+          <span className="text-xs font-semibold uppercase text-gray-500">
+            Teacher source
+          </span>
+          <div className="flex flex-col gap-2 md:flex-row md:items-center md:gap-6">
+            <label className="flex items-center gap-2">
+              <input
+                type="radio"
+                name="teacher-source"
+                value="new"
+                checked={mode === "new"}
+                onChange={() => handleModeChange("new")}
+                className="accent-lamaPurple"
+              />
+              Enter new teacher details
+            </label>
+            <label className="flex items-center gap-2">
+              <input
+                type="radio"
+                name="teacher-source"
+                value="existing"
+                checked={mode === "existing"}
+                onChange={() => handleModeChange("existing")}
+                className="accent-lamaPurple"
+              />
+              Copy details from an existing teacher
+            </label>
+          </div>
+
+          {mode === "existing" && (
+            <div className="flex flex-col gap-3">
+              <div className="flex flex-col gap-2">
+                <label className="text-xs text-gray-500">Existing teacher</label>
+                <select
+                  className="w-full rounded-md border border-gray-300 p-2 text-sm"
+                  value={typeof selectedExistingId === "number" ? selectedExistingId : ""}
+                  onChange={(event) => handleSelectExisting(event.target.value)}
+                  disabled={existingLoading}
+                >
+                  <option value="">
+                    {existingLoading ? "Loading teachers..." : "Select a teacher"}
+                  </option>
+                  {existingTeachers.map((teacher) => (
+                    <option key={teacher.id} value={teacher.id}>
+                      {teacher.fullName} ({teacher.teacherCode}) - {teacher.schoolName}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              {existingError && (
+                <p className="text-xs text-red-500">{existingError}</p>
+              )}
+              {!existingLoading && existingTeachers.length === 0 && !existingError && (
+                <p className="text-xs text-gray-500">
+                  No teachers are available to copy yet. Create one manually first.
+                </p>
+              )}
+              <p className="text-xs text-gray-500">
+                Selecting an existing teacher copies their profile into this school. You can still
+                adjust the details before saving.
+              </p>
+            </div>
+          )}
+        </div>
+      )}
 
       <span className="text-xs text-gray-400 font-medium">Teacher Information</span>
       <div className="flex justify-between flex-wrap gap-4">
