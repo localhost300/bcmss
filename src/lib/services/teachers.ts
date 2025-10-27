@@ -48,6 +48,7 @@ export type TeacherListItem = {
   schoolName: string;
   subjects: string[];
   classes: string[];
+  classIds: number[];
 };
 
 export type ListTeachersResult = {
@@ -71,7 +72,7 @@ const sanitizePaging = ({ page, pageSize }: PaginationParams = {}): { page: numb
 const teacherInclude = {
   school: { select: { id: true, name: true } },
   subjects: { include: { subject: { select: { name: true } } } },
-  classes: { include: { class: { select: { name: true } } } },
+  classes: { select: { classId: true, class: { select: { name: true } } } },
 } satisfies Prisma.TeacherInclude;
 
 
@@ -97,11 +98,19 @@ const mapTeacherRecord = (record: TeacherWithRelations): TeacherListItem => {
     ),
   );
 
+  const classEntries = record.classes ?? [];
   const classes = Array.from(
     new Set(
-      record.classes
+      classEntries
         .map((relation) => relation.class?.name)
         .filter((name): name is string => Boolean(name)),
+    ),
+  );
+  const classIds = Array.from(
+    new Set(
+      classEntries
+        .map((relation) => relation.classId)
+        .filter((value): value is number => typeof value === "number" && Number.isFinite(value)),
     ),
   );
 
@@ -117,6 +126,7 @@ const mapTeacherRecord = (record: TeacherWithRelations): TeacherListItem => {
     schoolName: record.school?.name ?? "",
     subjects,
     classes,
+    classIds,
   };
 };
 

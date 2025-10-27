@@ -34,6 +34,35 @@ type SubjectFormProps = {
   onSuccess?: (payload?: unknown) => Promise<void> | void;
 };
 
+const normaliseNumberArray = (input: Array<number | null | undefined>): number[] => {
+  const unique = new Set<number>();
+  input.forEach((value) => {
+    if (typeof value === "number" && Number.isFinite(value)) {
+      unique.add(Math.trunc(value));
+    }
+  });
+  return Array.from(unique).sort((a, b) => a - b);
+};
+
+const mapsAreEqual = (
+  left: Record<number, number | null>,
+  right: Record<number, number | null>,
+): boolean => {
+  const leftKeys = Object.keys(left);
+  const rightKeys = Object.keys(right);
+  if (leftKeys.length !== rightKeys.length) {
+    return false;
+  }
+  return leftKeys.every((key) => left[Number(key)] === right[Number(key)]);
+};
+
+const arraysEqual = (a: number[], b: number[]): boolean => {
+  if (a.length !== b.length) {
+    return false;
+  }
+  return a.every((value, index) => value === b[index]);
+};
+
 const SubjectForm = ({ type, data, id, onSuccess }: SubjectFormProps) => {
   const { activeSchoolId, schools, canSwitch } = useSchool();
   const scopeId = useSchoolScope();
@@ -50,9 +79,12 @@ const SubjectForm = ({ type, data, id, onSuccess }: SubjectFormProps) => {
   const [classesLoading, setClassesLoading] = useState(false);
   const [classError, setClassError] = useState<string | null>(null);
 
-  const [teacherOptions, setTeacherOptions] = useState<Array<{ id: number; name: string }>>([]);
+  const [teacherOptions, setTeacherOptions] = useState<
+    Array<{ id: number; name: string; classIds: number[] }>
+  >([]);
   const [teachersLoading, setTeachersLoading] = useState(false);
   const [teacherError, setTeacherError] = useState<string | null>(null);
+  const [classTeacherMap, setClassTeacherMap] = useState<Record<number, number | null>>({});
 
   const entityId = (data as { id?: number | string } | undefined)?.id ?? id;
 
@@ -85,15 +117,30 @@ const SubjectForm = ({ type, data, id, onSuccess }: SubjectFormProps) => {
     reset,
     watch,
     setValue,
+    getValues,
   } = useForm<Inputs>({
     resolver: zodResolver(schema),
     defaultValues,
   });
 
   const watchedSchoolId = watch("schoolId");
-  const watchedClassIds = watch("classIds");
-  const watchedTeacherIds = watch("teacherIds");
+  const watchedClassIdsRaw = watch("classIds");
+  const watchedClassIds = useMemo(
+    () =>
+      Array.isArray(watchedClassIdsRaw)
+        ? watchedClassIdsRaw.filter((value): value is number => typeof value === "number")
+        : [],
+    [watchedClassIdsRaw],
+  );
   const selectedSchoolId = (canSwitch ? watchedSchoolId || activeSchoolId || scopeId : scopeId) ?? "";
+  const selectedClasses = useMemo(
+    () => classOptions.filter((option) => watchedClassIds.includes(option.id)),
+    [classOptions, watchedClassIds],
+  );
+
+  useEffect(() => {
+    register("teacherIds");
+  }, [register]);
 
   useEffect(() => {
     let ignore = false;
@@ -169,7 +216,7 @@ const SubjectForm = ({ type, data, id, onSuccess }: SubjectFormProps) => {
         params.set("pageSize", "200");
         params.set("schoolId", selectedSchoolId);
         const response = await getJSON<{
-          items: Array<{ id: number; name: string; teacherId: string }>;
+          items: Array<{ id: number; name: string; teacherId: string; classIds?: number[] }>;
         }>(`/api/teachers?${params.toString()}`);
 
         if (ignore) return;
@@ -178,6 +225,7 @@ const SubjectForm = ({ type, data, id, onSuccess }: SubjectFormProps) => {
           .map((teacher) => ({
             id: teacher.id,
             name: teacher.name || teacher.teacherId,
+            classIds: normaliseNumberArray(teacher.classIds ?? []),
           }))
           .sort((a, b) => a.name.localeCompare(b.name));
 
@@ -201,18 +249,52 @@ const SubjectForm = ({ type, data, id, onSuccess }: SubjectFormProps) => {
   }, [selectedSchoolId]);
 
   useEffect(() => {
-    if (!Array.isArray(watchedTeacherIds) || watchedTeacherIds.length === 0) {
-      return;
-    }
+    setClassTeacherMap((prev) => {
+      if (!watchedClassIds.length) {
+        return Object.keys(prev).length ? {} : prev;
+      }
 
-    const filtered = watchedTeacherIds.filter((teacherId) =>
-      teacherOptions.some((option) => option.id === teacherId),
-    );
+      const currentTeacherIds = normaliseNumberArray(getValues("teacherIds") ?? []);
+      const next: Record<number, number | null> = {};
 
-    if (filtered.length !== watchedTeacherIds.length) {
-      setValue("teacherIds", filtered);
+      watchedClassIds.forEach((classId) => {
+        const existing = prev[classId] ?? null;
+        const isExistingValid =
+          typeof existing === "number" &&
+          teacherOptions.some(
+            (teacher) => teacher.id === existing && teacher.classIds.includes(classId),
+          );
+
+        let value: number | null = isExistingValid ? existing : null;
+
+        if (value === null) {
+          const fallback = currentTeacherIds.find((teacherId) =>
+            teacherOptions.some(
+              (teacher) => teacher.id === teacherId && teacher.classIds.includes(classId),
+            ),
+          );
+          value = typeof fallback === "number" ? fallback : null;
+        }
+
+        next[classId] = value;
+      });
+
+      if (mapsAreEqual(prev, next)) {
+        return prev;
+      }
+
+      return next;
+    });
+  }, [watchedClassIds, teacherOptions, getValues]);
+
+  useEffect(() => {
+    const selectedTeacherIds = normaliseNumberArray(Object.values(classTeacherMap));
+    const currentTeacherIds = normaliseNumberArray(getValues("teacherIds") ?? []);
+
+    if (!arraysEqual(selectedTeacherIds, currentTeacherIds)) {
+      setValue("teacherIds", selectedTeacherIds, { shouldDirty: true });
     }
-  }, [teacherOptions, watchedTeacherIds, setValue]);
+  }, [classTeacherMap, getValues, setValue]);
 
   const onSubmit = handleSubmit(async (formData) => {
     setErrorMessage(null);
@@ -257,6 +339,7 @@ const SubjectForm = ({ type, data, id, onSuccess }: SubjectFormProps) => {
           teacherIds: [],
           schoolId: canSwitch ? activeSchoolId : scopeId,
         });
+        setClassTeacherMap({});
       }
 
       await Promise.resolve(onSuccess?.(response));
@@ -268,42 +351,6 @@ const SubjectForm = ({ type, data, id, onSuccess }: SubjectFormProps) => {
   });
 
   const renderClassCheckboxes = (
-    field: { value: number[]; onChange: (value: number[]) => void },
-    options: { id: number; name: string }[],
-    errorText?: string,
-  ) => {
-    const currentValue = field.value ?? [];
-
-    return (
-      <div className="flex flex-col gap-2 w-full">
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-          {options.map((option) => {
-            const isChecked = currentValue.includes(option.id);
-            const handleToggle = () => {
-              if (isChecked) {
-                field.onChange(currentValue.filter((item) => item !== option.id));
-              } else {
-                field.onChange([...currentValue, option.id]);
-              }
-            };
-
-            return (
-              <label
-                key={option.id}
-                className="flex items-center gap-2 rounded-md border border-gray-200 px-3 py-2 text-sm cursor-pointer hover:border-lamaPurpleLight"
-              >
-                <input type="checkbox" checked={isChecked} onChange={handleToggle} className="accent-lamaPurple" />
-                <span>{option.name}</span>
-              </label>
-            );
-          })}
-        </div>
-        {errorText && <p className="text-xs text-red-400">{errorText}</p>}
-      </div>
-    );
-  };
-
-  const renderTeacherCheckboxes = (
     field: { value: number[]; onChange: (value: number[]) => void },
     options: { id: number; name: string }[],
     errorText?: string,
@@ -391,17 +438,68 @@ const SubjectForm = ({ type, data, id, onSuccess }: SubjectFormProps) => {
         </div>
         <div className="flex flex-col gap-2 md:col-span-2">
           <label className="text-xs text-gray-500">Assign Teachers</label>
-          <Controller
-            control={control}
-            name="teacherIds"
-            render={({ field }) =>
-              renderTeacherCheckboxes(field, teacherOptions, errors.teacherIds?.message?.toString())
-            }
-          />
           {teachersLoading && <p className="text-xs text-gray-400">Loading teachers...</p>}
           {teacherError && <p className="text-xs text-red-400">{teacherError}</p>}
-          {!teachersLoading && teacherOptions.length === 0 && !teacherError && (
-            <p className="text-xs text-gray-400">No teachers available for this campus.</p>
+          {!teachersLoading && !teacherError && selectedClasses.length === 0 && (
+            <p className="text-xs text-gray-400">Select at least one class to assign teachers.</p>
+          )}
+          {!teachersLoading && selectedClasses.length > 0 && (
+            <div className="flex flex-col gap-3">
+              {selectedClasses.map((klass) => {
+                const optionsForClass = teacherOptions.filter((teacher) =>
+                  teacher.classIds.includes(klass.id),
+                );
+                const selectedTeacherId = classTeacherMap[klass.id] ?? null;
+                return (
+                  <div
+                    key={klass.id}
+                    className="flex flex-col gap-2 rounded-md border border-gray-200 bg-gray-50 p-3"
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-semibold text-gray-700">{klass.name}</span>
+                      {optionsForClass.length > 0 && (
+                        <span className="text-xs text-gray-500">
+                          {optionsForClass.length} teacher{optionsForClass.length === 1 ? "" : "s"} available
+                        </span>
+                      )}
+                    </div>
+                    <select
+                      className="ring-[1.5px] ring-gray-300 p-2 rounded-md text-sm bg-white"
+                      value={selectedTeacherId !== null ? String(selectedTeacherId) : ""}
+                      onChange={(event) => {
+                        const value = event.target.value ? Number(event.target.value) : null;
+                        setClassTeacherMap((prev) => ({
+                          ...prev,
+                          [klass.id]: value,
+                        }));
+                      }}
+                      disabled={optionsForClass.length === 0}
+                    >
+                      <option value="">Select teacher</option>
+                      {optionsForClass.map((teacher) => (
+                        <option key={teacher.id} value={teacher.id}>
+                          {teacher.name}
+                        </option>
+                      ))}
+                    </select>
+                    {optionsForClass.length === 0 && (
+                      <p className="text-xs text-gray-500">
+                        No teachers currently assigned to this class.
+                      </p>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          {!teachersLoading &&
+            teacherOptions.length === 0 &&
+            !teacherError &&
+            selectedClasses.length === 0 && (
+              <p className="text-xs text-gray-400">No teachers available for this campus.</p>
+            )}
+          {errors.teacherIds?.message && (
+            <p className="text-xs text-red-400">{errors.teacherIds.message?.toString()}</p>
           )}
         </div>
         <div className="flex flex-col gap-2">
