@@ -261,17 +261,13 @@ const SubjectForm = ({ type, data, id, onSuccess }: SubjectFormProps) => {
         const existing = prev[classId] ?? null;
         const isExistingValid =
           typeof existing === "number" &&
-          teacherOptions.some(
-            (teacher) => teacher.id === existing && teacher.classIds.includes(classId),
-          );
+          teacherOptions.some((teacher) => teacher.id === existing);
 
         let value: number | null = isExistingValid ? existing : null;
 
         if (value === null) {
           const fallback = currentTeacherIds.find((teacherId) =>
-            teacherOptions.some(
-              (teacher) => teacher.id === teacherId && teacher.classIds.includes(classId),
-            ),
+            teacherOptions.some((teacher) => teacher.id === teacherId),
           );
           value = typeof fallback === "number" ? fallback : null;
         }
@@ -446,9 +442,12 @@ const SubjectForm = ({ type, data, id, onSuccess }: SubjectFormProps) => {
           {!teachersLoading && selectedClasses.length > 0 && (
             <div className="flex flex-col gap-3">
               {selectedClasses.map((klass) => {
-                const optionsForClass = teacherOptions.filter((teacher) =>
-                  teacher.classIds.includes(klass.id),
-                );
+                const optionsForClass = teacherOptions
+                  .map((teacher) => ({
+                    ...teacher,
+                    priority: teacher.classIds.includes(klass.id) ? 0 : 1,
+                  }))
+                  .sort((a, b) => a.priority - b.priority || a.name.localeCompare(b.name));
                 const selectedTeacherId = classTeacherMap[klass.id] ?? null;
                 return (
                   <div
