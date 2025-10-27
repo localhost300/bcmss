@@ -442,12 +442,27 @@ export async function deleteStudentCascade(
     throw new NotFoundError("Student not found.");
   }
 
+  const parentLinks = await client.studentParent.findMany({
+    where: { studentId },
+    select: { parentId: true },
+  });
+
   await client.studentParent.deleteMany({ where: { studentId } });
   await client.studentAttendance.deleteMany({ where: { studentId } });
   await client.studentMessage.deleteMany({ where: { studentId } });
   await client.examScore.deleteMany({ where: { studentId } });
   await client.studentScoreRecord.deleteMany({ where: { studentId } });
   await client.student.delete({ where: { id: studentId } });
+
+  for (const link of parentLinks) {
+    const remainingAssociations = await client.studentParent.count({
+      where: { parentId: link.parentId },
+    });
+
+    if (remainingAssociations === 0) {
+      await client.parent.delete({ where: { id: link.parentId } });
+    }
+  }
 }
 
 export async function deleteStudent(id: string | number | undefined): Promise<void> {

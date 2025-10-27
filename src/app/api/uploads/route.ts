@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
+import { put } from "@vercel/blob";
 import { promises as fs } from "node:fs";
 import { randomUUID } from "node:crypto";
+import os from "node:os";
 import path from "node:path";
 
 export const dynamic = "force-dynamic";
@@ -18,6 +20,17 @@ const ALLOWED_IMAGE_TYPES: Record<string, string> = {
 
 const ensureUploadsDir = async (uploadsDir: string) => {
   await fs.mkdir(uploadsDir, { recursive: true });
+};
+
+const isBlobAvailable = () =>
+  Boolean(process.env.VERCEL || process.env.BLOB_READ_WRITE_TOKEN);
+
+const uploadWithBlob = async (key: string, buffer: Buffer, contentType: string) => {
+  const blob = await put(key, buffer, {
+    access: "public",
+    contentType,
+  });
+  return blob.url;
 };
 
 export async function POST(request: Request) {
@@ -42,13 +55,55 @@ export async function POST(request: Request) {
 
     const extension = ALLOWED_IMAGE_TYPES[file.type];
     const uniqueName = `${Date.now()}-${randomUUID()}.${extension}`;
+    const buffer = Buffer.from(await file.arrayBuffer());
+
+    if (isBlobAvailable()) {
+      try {
+        const publicUrl = await uploadWithBlob(`uploads/${uniqueName}`, buffer, file.type);
+
+        return NextResponse.json(
+          {
+            message: "Upload successful.",
+            data: {
+              url: publicUrl,
+              size: file.size,
+              type: file.type,
+              name: uniqueName,
+            },
+          },
+          { status: 201 },
+        );
+      } catch (blobError) {
+        console.warn("[Uploads API] Falling back to local storage", blobError);
+      }
+    }
+
     const uploadsDir = path.join(process.cwd(), "public", "uploads");
     const destinationPath = path.join(uploadsDir, uniqueName);
 
-    await ensureUploadsDir(uploadsDir);
+    try {
+      await ensureUploadsDir(uploadsDir);
+      await fs.writeFile(destinationPath, buffer);
+    } catch (fsError) {
+      const tempDir = path.join(os.tmpdir(), "uploads");
+      await ensureUploadsDir(tempDir);
+      const tempPath = path.join(tempDir, uniqueName);
+      await fs.writeFile(tempPath, buffer);
 
-    const buffer = Buffer.from(await file.arrayBuffer());
-    await fs.writeFile(destinationPath, buffer);
+      return NextResponse.json(
+        {
+          message:
+            "Upload completed, but serving from temporary storage. Configure persistent storage for production.",
+          data: {
+            url: `/api/uploads/${uniqueName}`,
+            size: file.size,
+            type: file.type,
+            name: uniqueName,
+          },
+        },
+        { status: 202 },
+      );
+    }
 
     const publicUrl = `/uploads/${uniqueName}`;
 
