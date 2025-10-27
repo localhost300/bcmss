@@ -22,6 +22,7 @@ type SaveSubjectInput = {
   schoolId: string;
   classIds: number[];
   teacherIds?: number[];
+  classTeacherAssignments?: Array<{ classId: number; teacherId: number | null }>;
 };
 
 type ListSubjectsFilters = PaginationParams & {
@@ -41,6 +42,7 @@ export type SubjectListItem = {
   classes: Array<{ id: number; name: string }>;
   teachers: Array<{ id: number; name: string; teacherCode: string | null }>;
   teacherIds: number[];
+  classTeacherAssignments: Array<{ classId: number; teacherId: number | null }>;
 };
 
 export type ListSubjectsResult = {
@@ -84,6 +86,38 @@ const normaliseTeacherIds = (teacherIds: number[] | undefined): number[] => {
   );
 };
 
+const normaliseClassTeacherAssignments = (
+  assignments: Array<{ classId: number; teacherId: number | null }> | undefined,
+  allowedClassIds: number[],
+): Array<{ classId: number; teacherId: number | null }> => {
+  if (!Array.isArray(assignments) || assignments.length === 0) {
+    return [];
+  }
+  const allowed = new Set(allowedClassIds);
+  const map = new Map<number, number | null>();
+
+  assignments.forEach((assignment) => {
+    if (!assignment || typeof assignment.classId !== "number") {
+      return;
+    }
+    const classId = Math.trunc(assignment.classId);
+    if (!allowed.has(classId)) {
+      return;
+    }
+    const teacherIdValue = assignment.teacherId;
+    if (typeof teacherIdValue === "number" && Number.isInteger(teacherIdValue) && teacherIdValue > 0) {
+      map.set(classId, Math.trunc(teacherIdValue));
+    } else {
+      map.set(classId, null);
+    }
+  });
+
+  return Array.from(map.entries()).map(([classId, teacherId]) => ({
+    classId,
+    teacherId,
+  }));
+};
+
 const subjectSelect = {
   id: true,
   name: true,
@@ -97,6 +131,12 @@ const subjectSelect = {
   teachers: {
     include: {
       teacher: { select: { id: true, fullName: true, teacherCode: true } },
+    },
+  },
+  classAssignments: {
+    select: {
+      classId: true,
+      teacherId: true,
     },
   },
 } satisfies Prisma.SubjectSelect;
@@ -133,9 +173,18 @@ const mapSubjectRecord = (record: SubjectWithRelations): SubjectListItem => ({
       ): teacher is SubjectListItem["teachers"][number] => Boolean(teacher),
     )
     .sort((a, b) => a.name.localeCompare(b.name)),
-  teacherIds: record.teachers
-    .map((relation) => relation.teacher?.id)
-    .filter((id): id is number => typeof id === "number"),
+  teacherIds: Array.from(
+    new Set(
+      record.teachers
+        .map((relation) => relation.teacher?.id)
+        .filter((id): id is number => typeof id === "number"),
+    ),
+  ),
+  classTeacherAssignments:
+    record.classAssignments?.map((assignment) => ({
+      classId: assignment.classId,
+      teacherId: assignment.teacherId,
+    })) ?? [],
 });
 
 const sanitizePaging = ({ page, pageSize }: PaginationParams = {}): { page: number; pageSize: number } => {
@@ -242,7 +291,17 @@ export async function getSubjectById(id: string | number | undefined): Promise<S
 
 export async function createSubject(input: SaveSubjectInput): Promise<Subject> {
   const classIds = ensureClassIds(input.classIds);
-  const teacherIds = normaliseTeacherIds(input.teacherIds);
+  const classTeacherAssignments = normaliseClassTeacherAssignments(
+    input.classTeacherAssignments,
+    classIds,
+  );
+  const assignmentTeacherIds = classTeacherAssignments
+    .map((assignment) => assignment.teacherId)
+    .filter((value): value is number => typeof value === "number");
+  const teacherIds = normaliseTeacherIds([
+    ...(Array.isArray(input.teacherIds) ? input.teacherIds : []),
+    ...assignmentTeacherIds,
+  ]);
 
   return prisma.$transaction(async (tx) => {
     const subject = await tx.subject.create({
@@ -261,6 +320,27 @@ export async function createSubject(input: SaveSubjectInput): Promise<Subject> {
       });
     }
 
+    const classTeacherPairs = classTeacherAssignments.filter(
+      (assignment): assignment is { classId: number; teacherId: number } =>
+        typeof assignment.teacherId === "number",
+    );
+
+    if (classTeacherPairs.length > 0) {
+      const uniquePairs = Array.from(
+        new Map(classTeacherPairs.map((pair) => [`${pair.classId}:${pair.teacherId}`, pair])).values(),
+      );
+
+      await tx.subjectClassTeacher.createMany({
+        data: uniquePairs.map(({ classId, teacherId }) => ({
+          subjectId: subject.id,
+          classId,
+          teacherId,
+        })),
+        skipDuplicates: true,
+      });
+
+    }
+
     return subject;
   });
 }
@@ -271,7 +351,17 @@ export async function updateSubject(
 ): Promise<Subject> {
   const subjectId = coerceToIntId(id, "subject");
   const classIds = ensureClassIds(input.classIds);
-  const teacherIds = normaliseTeacherIds(input.teacherIds);
+  const classTeacherAssignments = normaliseClassTeacherAssignments(
+    input.classTeacherAssignments,
+    classIds,
+  );
+  const assignmentTeacherIds = classTeacherAssignments
+    .map((assignment) => assignment.teacherId)
+    .filter((value): value is number => typeof value === "number");
+  const teacherIds = normaliseTeacherIds([
+    ...(Array.isArray(input.teacherIds) ? input.teacherIds : []),
+    ...assignmentTeacherIds,
+  ]);
 
   try {
     return await prisma.$transaction(async (tx) => {
@@ -286,13 +376,36 @@ export async function updateSubject(
         skipDuplicates: true,
       });
 
-       await tx.teacherSubject.deleteMany({ where: { subjectId } });
-       if (teacherIds.length > 0) {
-         await tx.teacherSubject.createMany({
-           data: teacherIds.map((teacherId) => ({ subjectId, teacherId })),
-           skipDuplicates: true,
-         });
-       }
+      await tx.teacherSubject.deleteMany({ where: { subjectId } });
+      if (teacherIds.length > 0) {
+        await tx.teacherSubject.createMany({
+          data: teacherIds.map((teacherId) => ({ subjectId, teacherId })),
+          skipDuplicates: true,
+        });
+      }
+
+      await tx.subjectClassTeacher.deleteMany({ where: { subjectId } });
+
+      const classTeacherPairs = classTeacherAssignments.filter(
+        (assignment): assignment is { classId: number; teacherId: number } =>
+          typeof assignment.teacherId === "number",
+      );
+
+      if (classTeacherPairs.length > 0) {
+        const uniquePairs = Array.from(
+          new Map(classTeacherPairs.map((pair) => [`${pair.classId}:${pair.teacherId}`, pair])).values(),
+        );
+
+        await tx.subjectClassTeacher.createMany({
+          data: uniquePairs.map(({ classId, teacherId }) => ({
+            subjectId,
+            classId,
+            teacherId,
+          })),
+          skipDuplicates: true,
+        });
+
+      }
 
       return subject;
     });
@@ -328,6 +441,7 @@ export async function deleteSubjectCascade(
 
   await client.teacherSubject.deleteMany({ where: { subjectId: subject.id } });
   await client.subjectClass.deleteMany({ where: { subjectId: subject.id } });
+  await client.subjectClassTeacher.deleteMany({ where: { subjectId: subject.id } });
 
   if (subject.name) {
     await client.studentScoreRecord.deleteMany({

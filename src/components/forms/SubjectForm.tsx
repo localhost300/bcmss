@@ -1,7 +1,7 @@
 "use client";
 
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Controller, useForm } from "react-hook-form";
 import { z } from "zod";
 
@@ -29,6 +29,7 @@ type SubjectFormProps = {
   type: "create" | "update";
   data?: Partial<Inputs> & { id?: number | string } & {
     teachers?: Array<{ id?: number }>;
+    classTeacherAssignments?: Array<{ classId: number; teacherId: number | null }>;
   };
   id?: number | string;
   onSuccess?: (payload?: unknown) => Promise<void> | void;
@@ -143,6 +144,20 @@ const SubjectForm = ({ type, data, id, onSuccess }: SubjectFormProps) => {
   }, [register]);
 
   useEffect(() => {
+    if (data?.classTeacherAssignments && data.classTeacherAssignments.length > 0) {
+      const next: Record<number, number | null> = {};
+      data.classTeacherAssignments.forEach(({ classId, teacherId }) => {
+        if (typeof classId === "number") {
+          next[classId] = typeof teacherId === "number" ? teacherId : null;
+        }
+      });
+      setClassTeacherMap((prev) => (mapsAreEqual(prev, next) ? prev : next));
+    } else {
+      setClassTeacherMap((prev) => (Object.keys(prev).length > 0 ? {} : prev));
+    }
+  }, [data?.classTeacherAssignments]);
+
+  useEffect(() => {
     let ignore = false;
 
     const loadClasses = async () => {
@@ -254,7 +269,12 @@ const SubjectForm = ({ type, data, id, onSuccess }: SubjectFormProps) => {
         return Object.keys(prev).length ? {} : prev;
       }
 
-      const currentTeacherIds = normaliseNumberArray(getValues("teacherIds") ?? []);
+      const teacherIdsValue = getValues("teacherIds");
+      const currentTeacherIds = normaliseNumberArray(
+        Array.isArray(teacherIdsValue)
+          ? (teacherIdsValue as Array<number | null | undefined>)
+          : [],
+      );
       const next: Record<number, number | null> = {};
 
       watchedClassIds.forEach((classId) => {
@@ -264,6 +284,17 @@ const SubjectForm = ({ type, data, id, onSuccess }: SubjectFormProps) => {
           teacherOptions.some((teacher) => teacher.id === existing);
 
         let value: number | null = isExistingValid ? existing : null;
+
+        if (value === null) {
+          const preferred = currentTeacherIds.find((teacherId) =>
+            teacherOptions.some(
+              (teacher) => teacher.id === teacherId && teacher.classIds.includes(classId),
+            ),
+          );
+          if (typeof preferred === "number") {
+            value = preferred;
+          }
+        }
 
         if (value === null) {
           const fallback = currentTeacherIds.find((teacherId) =>
@@ -285,7 +316,12 @@ const SubjectForm = ({ type, data, id, onSuccess }: SubjectFormProps) => {
 
   useEffect(() => {
     const selectedTeacherIds = normaliseNumberArray(Object.values(classTeacherMap));
-    const currentTeacherIds = normaliseNumberArray(getValues("teacherIds") ?? []);
+    const teacherIdsValue = getValues("teacherIds");
+    const currentTeacherIds = normaliseNumberArray(
+      Array.isArray(teacherIdsValue)
+        ? (teacherIdsValue as Array<number | null | undefined>)
+        : [],
+    );
 
     if (!arraysEqual(selectedTeacherIds, currentTeacherIds)) {
       setValue("teacherIds", selectedTeacherIds, { shouldDirty: true });
@@ -306,12 +342,22 @@ const SubjectForm = ({ type, data, id, onSuccess }: SubjectFormProps) => {
       return;
     }
 
+    const uniqueClassIds = Array.from(new Set(watchedClassIds));
+    const classTeacherAssignments = uniqueClassIds.map((classId) => ({
+      classId,
+      teacherId: classTeacherMap[classId] ?? null,
+    }));
+    const teacherIdsForPayload = normaliseNumberArray(
+      classTeacherAssignments.map((assignment) => assignment.teacherId),
+    );
+
     const payload: Record<string, unknown> = {
       ...formData,
       code: formData.code?.trim() ?? "",
       category: formData.category?.trim() ?? "",
       description: formData.description?.trim() ?? "",
-      teacherIds: formData.teacherIds ?? [],
+      teacherIds: teacherIdsForPayload,
+      classTeacherAssignments,
       action: type,
     };
 

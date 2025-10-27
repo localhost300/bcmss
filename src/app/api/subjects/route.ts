@@ -43,6 +43,18 @@ const requestSchema = z.object({
     .array(z.union([z.number().int().positive(), z.string().trim().min(1)]))
     .optional()
     .default([]),
+  classTeacherAssignments: z
+    .array(
+      z.object({
+        classId: z.union([z.number().int().positive(), z.string().trim().min(1)]),
+        teacherId: z
+          .union([z.number().int().positive(), z.string().trim().min(1)])
+          .optional()
+          .nullable(),
+      }),
+    )
+    .optional()
+    .default([]),
 });
 
 const normalisePayload = (raw: unknown) => {
@@ -72,6 +84,37 @@ const normalisePayload = (raw: unknown) => {
     })
     .filter((value): value is number => typeof value === "number" && value > 0);
 
+  const classTeacherAssignments = (parsed.classTeacherAssignments ?? [])
+    .map((assignment) => {
+      const rawClassId = assignment.classId;
+      const classId =
+        typeof rawClassId === "number"
+          ? rawClassId
+          : Number.isFinite(Number(rawClassId))
+          ? Number(rawClassId)
+          : null;
+
+      if (!classId || classId <= 0) {
+        return null;
+      }
+
+      const rawTeacherId = assignment.teacherId;
+      let teacherId: number | null = null;
+      if (typeof rawTeacherId === "number") {
+        teacherId = Number.isFinite(rawTeacherId) && rawTeacherId > 0 ? rawTeacherId : null;
+      } else if (typeof rawTeacherId === "string" && rawTeacherId.trim().length > 0) {
+        const parsedValue = Number(rawTeacherId);
+        teacherId = Number.isFinite(parsedValue) && parsedValue > 0 ? parsedValue : null;
+      }
+
+      return { classId, teacherId };
+    })
+    .filter(
+      (
+        assignment,
+      ): assignment is { classId: number; teacherId: number | null } => assignment !== null,
+    );
+
   return {
     action: parsed.action,
     id: parsed.id,
@@ -83,6 +126,7 @@ const normalisePayload = (raw: unknown) => {
     classIds,
     schoolId: parsed.schoolId,
     teacherIds,
+    classTeacherAssignments,
   };
 };
 
@@ -119,11 +163,12 @@ export async function POST(request: NextRequest) {
       code: payload.code,
       category: payload.category,
       creditHours: payload.creditHours,
-      description: payload.description,
-      classIds: payload.classIds,
-      schoolId: payload.schoolId,
-      teacherIds: payload.teacherIds,
-    };
+    description: payload.description,
+    classIds: payload.classIds,
+    schoolId: payload.schoolId,
+    teacherIds: payload.teacherIds,
+    classTeacherAssignments: payload.classTeacherAssignments,
+  };
 
     if (payload.action === "create") {
       const record = await createSubject(subjectInput);

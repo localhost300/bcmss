@@ -106,6 +106,7 @@ model Teacher {
   user        User?            @relation(fields: [userId], references: [id])
   subjects    TeacherSubject[]
   classes     TeacherClass[]
+  subjectClassAssignments SubjectClassTeacher[]
   createdAt   DateTime         @default(now())
   updatedAt   DateTime         @updatedAt
   SchoolClass SchoolClass[]
@@ -125,6 +126,7 @@ model Subject {
   teachers    TeacherSubject[]
   classes     SubjectClass[]
   exams       Exam[]
+  classAssignments SubjectClassTeacher[]
   createdAt   DateTime         @default(now())
   updatedAt   DateTime         @updatedAt
 
@@ -149,6 +151,7 @@ model SchoolClass {
   teachers      TeacherClass[]
   subjects      SubjectClass[]
   exams         Exam[]
+  subjectAssignments SubjectClassTeacher[]
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
   ResultLock    ResultLock[]
@@ -356,6 +359,23 @@ model StudentMessage {
   body      String
   createdAt DateTime @default(now())
   student   Student  @relation(fields: [studentId], references: [id])
+}
+
+model SubjectClassTeacher {
+  id        Int      @id @default(autoincrement())
+  subjectId Int
+  classId   Int
+  teacherId Int
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  subject Subject     @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  class   SchoolClass @relation(fields: [classId], references: [id], onDelete: Cascade)
+  teacher Teacher     @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+
+  @@unique([subjectId, classId])
+  @@index([teacherId])
+  @@index([classId])
 }
 
 model StudentScoreRecord {

@@ -73,6 +73,9 @@ const teacherInclude = {
   school: { select: { id: true, name: true } },
   subjects: { include: { subject: { select: { name: true } } } },
   classes: { select: { classId: true, class: { select: { name: true } } } },
+  subjectClassAssignments: {
+    select: { classId: true, class: { select: { name: true } } },
+  },
 } satisfies Prisma.TeacherInclude;
 
 
@@ -98,21 +101,31 @@ const mapTeacherRecord = (record: TeacherWithRelations): TeacherListItem => {
     ),
   );
 
-  const classEntries = record.classes ?? [];
-  const classes = Array.from(
-    new Set(
-      classEntries
-        .map((relation) => relation.class?.name)
-        .filter((name): name is string => Boolean(name)),
-    ),
-  );
-  const classIds = Array.from(
-    new Set(
-      classEntries
-        .map((relation) => relation.classId)
-        .filter((value): value is number => typeof value === "number" && Number.isFinite(value)),
-    ),
-  );
+  const classNameSet = new Set<string>();
+  const classIdSet = new Set<number>();
+
+  const captureClass = (classId?: number | null, name?: string | null) => {
+    if (typeof classId === "number" && Number.isFinite(classId)) {
+      classIdSet.add(classId);
+    }
+    if (typeof name === "string") {
+      const trimmed = name.trim();
+      if (trimmed.length > 0) {
+        classNameSet.add(trimmed);
+      }
+    }
+  };
+
+  (record.classes ?? []).forEach((relation) => {
+    captureClass(relation.classId, relation.class?.name ?? null);
+  });
+
+  (record.subjectClassAssignments ?? []).forEach((relation) => {
+    captureClass(relation.classId, relation.class?.name ?? null);
+  });
+
+  const classes = Array.from(classNameSet).sort((a, b) => a.localeCompare(b));
+  const classIds = Array.from(classIdSet).sort((a, b) => a - b);
 
   return {
     id: record.id,
