@@ -1,6 +1,21 @@
 import { z } from "zod";
 
-const logoSchema = z.string().trim().url().optional().or(z.literal(""));
+const logoSchema = z
+  .string()
+  .trim()
+  .refine((value) => {
+    if (!value) return true;
+    try {
+      // Accept absolute URLs
+      void new URL(value);
+      return true;
+    } catch (error) {
+      // Fall back to allowing site-relative paths (e.g. /uploads/file.png)
+      return value.startsWith("/");
+    }
+  }, { message: "Logo must be a valid URL or start with '/'." })
+  .optional()
+  .or(z.literal(""));
 
 export const schoolQuerySchema = z.object({
   search: z.string().trim().min(1).optional(),
