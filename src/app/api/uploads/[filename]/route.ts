@@ -51,7 +51,7 @@ export async function GET(
 
   const publicFile = await readFileIfExists(publicPath);
   if (publicFile) {
-    return new NextResponse(publicFile, {
+    return new NextResponse(publicFile as any, {
       status: 200,
       headers: {
         "Content-Type": getContentType(safeName),
@@ -62,7 +62,7 @@ export async function GET(
 
   const tempFile = await readFileIfExists(tempPath);
   if (tempFile) {
-    return new NextResponse(tempFile, {
+    return new NextResponse(tempFile as any, {
       status: 200,
       headers: {
         "Content-Type": getContentType(safeName),
