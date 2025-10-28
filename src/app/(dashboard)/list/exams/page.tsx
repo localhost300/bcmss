@@ -97,6 +97,70 @@ const parseAssessmentWindow = (
   }
 };
 
+const buildExamGroupKey = (exam: ExamListItem) => {
+  const subjectKey = exam.subjectId ?? exam.subjectName ?? "__NO_SUBJECT__";
+  return `${exam.name}::${subjectKey}`;
+};
+
+const groupExamsByNameAndSubject = (items: ExamListItem[]): ExamListItem[] => {
+  const orderedKeys: string[] = [];
+  const grouped = new Map<
+    string,
+    {
+      exam: ExamListItem;
+      classNames: Set<string>;
+      classIds: Set<number | "null">;
+    }
+  >();
+
+  for (const item of items) {
+    const key = buildExamGroupKey(item);
+    let entry = grouped.get(key);
+
+    if (!entry) {
+      entry = {
+        exam: { ...item },
+        classNames: new Set<string>(),
+        classIds: new Set<number | "null">(),
+      };
+      grouped.set(key, entry);
+      orderedKeys.push(key);
+    } else {
+      const { exam } = entry;
+      if (!exam.assessmentWindow && item.assessmentWindow) {
+        exam.assessmentWindow = item.assessmentWindow;
+      }
+      if (!exam.examDate && item.examDate) {
+        exam.examDate = item.examDate;
+      }
+      if (!exam.subjectName && item.subjectName) {
+        exam.subjectName = item.subjectName;
+      }
+    }
+
+    if (typeof item.classId === "number") {
+      entry.classIds.add(item.classId);
+    } else {
+      entry.classIds.add("null");
+    }
+
+    const classLabel = item.className?.trim();
+    if (classLabel) {
+      entry.classNames.add(classLabel);
+    }
+  }
+
+  return orderedKeys.map((key) => {
+    const entry = grouped.get(key)!;
+    if (entry.classIds.size > 1) {
+      entry.exam.className = "All Classes";
+    } else if (entry.classNames.size === 1) {
+      entry.exam.className = Array.from(entry.classNames)[0];
+    }
+    return entry.exam;
+  });
+};
+
 const ExamListPage = () => {
   const { user, loading: authLoading } = useAuth();
   const schoolScope = useSchoolScope();
@@ -150,7 +214,7 @@ const ExamListPage = () => {
           return;
         }
 
-        setExams(items);
+        setExams(groupExamsByNameAndSubject(items));
         setTotalPages(nextTotalPages);
       })
       .catch((err: unknown) => {
