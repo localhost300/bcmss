@@ -49,6 +49,13 @@ type ScoreRecord = {
 
 export type ScoreSheetRow = ScoreRecord;
 
+export type ScoreComponentDefinition = {
+  componentId: string;
+  label: string;
+  maxScore: number | null;
+  order: number;
+};
+
 export type StudentResultSummary = {
   id: string;
   studentId: number;
@@ -116,6 +123,7 @@ type ResultsContextValue = {
   isClassLoaded: (filters: ClassFilters) => boolean;
   getSubjectsForClass: (filters: SubjectFilters) => string[];
   getScoreSheets: (filters: ScoreFilters) => ScoreSheetRow[];
+  getScoreComponents: (filters: ScoreFilters) => ScoreComponentDefinition[];
   updateScore: (sheetId: string, componentId: string, value: number) => void;
   saveScores: (
     filters: ScoreFilters,
@@ -287,6 +295,26 @@ const clampScore = (value: number, max: number | null | undefined) => {
   return Math.max(0, Math.min(value, max));
 };
 
+const findMatchingMarkDistribution = (
+  distributions: ExamMarkDistribution[],
+  params: { examType: "midterm" | "final"; sessionId: string; term: string },
+): ExamMarkDistribution | undefined =>
+  distributions.find(
+    (distribution) =>
+      distribution.examType === params.examType &&
+      distribution.sessionId === params.sessionId &&
+      distribution.term === params.term,
+  ) ??
+  distributions.find(
+    (distribution) =>
+      distribution.examType === params.examType && distribution.sessionId === params.sessionId,
+  ) ??
+  distributions.find(
+    (distribution) =>
+      distribution.examType === params.examType && distribution.term === params.term,
+  ) ??
+  distributions.find((distribution) => distribution.examType === params.examType);
+
 const alignRecordsWithMarkDistributions = (
   records: ScoreRecord[],
   distributions: ExamMarkDistribution[],
@@ -296,26 +324,6 @@ const alignRecordsWithMarkDistributions = (
   const midtermTotals = new Map<string, { score: number; max: number }>();
   const alignedByKey = new Map<string, ScoreRecord>();
   const pool = distributions;
-
-  const findDistribution = (
-    examType: "midterm" | "final",
-    sessionId: string,
-    term: string,
-  ): ExamMarkDistribution | undefined =>
-    pool.find(
-      (distribution) =>
-        distribution.examType === examType &&
-        distribution.sessionId === sessionId &&
-        distribution.term === term,
-    ) ??
-    pool.find(
-      (distribution) =>
-        distribution.examType === examType && distribution.sessionId === sessionId,
-    ) ??
-    pool.find(
-      (distribution) => distribution.examType === examType && distribution.term === term,
-    ) ??
-    pool.find((distribution) => distribution.examType === examType);
 
   const normaliseRecord = (
     record: ScoreRecord,
@@ -419,13 +427,21 @@ const alignRecordsWithMarkDistributions = (
   const finalRecords = records.filter((record) => record.examType === "final");
 
   midtermRecords.forEach((record) => {
-    const distribution = findDistribution(record.examType, record.sessionId, record.term);
+    const distribution = findMatchingMarkDistribution(pool, {
+      examType: record.examType,
+      sessionId: record.sessionId,
+      term: record.term,
+    });
     const aligned = normaliseRecord(record, distribution, { midtermTotals });
     alignedByKey.set(buildRecordKey(record), aligned);
   });
 
   finalRecords.forEach((record) => {
-    const distribution = findDistribution(record.examType, record.sessionId, record.term);
+    const distribution = findMatchingMarkDistribution(pool, {
+      examType: record.examType,
+      sessionId: record.sessionId,
+      term: record.term,
+    });
     const aligned = normaliseRecord(record, distribution, { midtermTotals });
     alignedByKey.set(buildRecordKey(record), aligned);
   });
@@ -1037,6 +1053,75 @@ export const ResultsProvider = ({ children }: ResultsProviderProps) => {
     [applyDraft, classRecords],
   );
 
+  const getScoreComponents = useCallback(
+    (filters: ScoreFilters): ScoreComponentDefinition[] => {
+      const records = classRecords[buildClassKey(filters)] ?? [];
+      const matching = records.filter(
+        (record) =>
+          record.examType === filters.examType &&
+          record.subject === filters.subject &&
+          record.term === filters.term &&
+          record.sessionId === filters.sessionId,
+      );
+
+      const headerMap = new Map<string, ScoreComponentDefinition>();
+      matching.forEach((record) => {
+        record.components.forEach((component, index) => {
+          const maxScore = component.maxScore ?? null;
+          const existing = headerMap.get(component.componentId);
+          if (existing) {
+            const nextOrder = Math.min(existing.order, index);
+            const resolvedMaxScore =
+              existing.maxScore == null && maxScore != null ? maxScore : existing.maxScore;
+            const nextLabel = existing.label || component.label;
+            if (
+              nextOrder !== existing.order ||
+              resolvedMaxScore !== existing.maxScore ||
+              nextLabel !== existing.label
+            ) {
+              headerMap.set(component.componentId, {
+                componentId: component.componentId,
+                label: component.label || existing.label,
+                maxScore: resolvedMaxScore,
+                order: nextOrder,
+              });
+            }
+          } else {
+            headerMap.set(component.componentId, {
+              componentId: component.componentId,
+              label: component.label,
+              maxScore,
+              order: index,
+            });
+          }
+        });
+      });
+
+      const headers = Array.from(headerMap.values()).sort((a, b) => a.order - b.order);
+      if (headers.length) {
+        return headers;
+      }
+
+      const distribution = findMatchingMarkDistribution(markDistributions, {
+        examType: filters.examType,
+        sessionId: filters.sessionId,
+        term: filters.term,
+      });
+
+      if (distribution) {
+        return distribution.components.map((component, index) => ({
+          componentId: component.id,
+          label: component.label,
+          maxScore: component.weight,
+          order: index,
+        }));
+      }
+
+      return [];
+    },
+    [classRecords, markDistributions],
+  );
+
   const updateScore = useCallback(
     (sheetId: string, componentId: string, value: number) => {
       setDraftScores((prev) => {
@@ -1354,6 +1439,7 @@ export const ResultsProvider = ({ children }: ResultsProviderProps) => {
       isClassLoaded,
       getSubjectsForClass,
       getScoreSheets,
+      getScoreComponents,
       updateScore,
       saveScores,
       getResultSummaries,
@@ -1380,6 +1466,7 @@ export const ResultsProvider = ({ children }: ResultsProviderProps) => {
       isClassLoaded,
       getSubjectsForClass,
       getScoreSheets,
+      getScoreComponents,
       updateScore,
       saveScores,
       getResultSummaries,

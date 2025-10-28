@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import ScoreEntryTable from "@/components/results/ScoreEntryTable";
 import { useAuth } from "@/contexts/AuthContext";
-import { useResults, type ScoreSheetRow } from "@/contexts/ResultsContext";
+import { useResults, type ScoreComponentDefinition, type ScoreSheetRow } from "@/contexts/ResultsContext";
 import { useSessionScope, useTermScope } from "@/contexts/SessionContext";
 import { postJSON } from "@/lib/utils/api";
 
@@ -31,6 +31,7 @@ const LoadScoresPage = () => {
     getClassError,
     getSubjectsForClass,
     getScoreSheets,
+    getScoreComponents,
     updateScore,
     saveScores,
     gradeForPercentage,
@@ -156,6 +157,26 @@ const LoadScoresPage = () => {
       sessionId,
     });
   }, [selectedClass, selectedSubject, examType, term, sessionId, getScoreSheets]);
+
+  const componentDefinitions = useMemo<ScoreComponentDefinition[]>(() => {
+    if (!selectedClass || !selectedSubject || !sessionId) {
+      return [];
+    }
+    return getScoreComponents({
+      classId: selectedClass,
+      subject: selectedSubject,
+      examType,
+      term,
+      sessionId,
+    });
+  }, [
+    selectedClass,
+    selectedSubject,
+    examType,
+    term,
+    sessionId,
+    getScoreComponents,
+  ]);
 
   const filteredRows = useMemo(() => {
     const query = searchTerm.trim().toLowerCase();
@@ -557,15 +578,22 @@ const LoadScoresPage = () => {
                     {lockMessage}
                   </div>
                 )}
-                <ScoreEntryTable
-                  rows={filteredRows}
-                  examType={examType}
-                  resolveGrade={resolveGrade}
-                  onScoreChange={handleScoreChange}
-                  onSave={handleSave}
-                  isSaving={isSaving}
-                  readOnly={isReadOnly}
-                />
+                {componentDefinitions.length ? (
+                  <ScoreEntryTable
+                    rows={filteredRows}
+                    examType={examType}
+                    components={componentDefinitions}
+                    resolveGrade={resolveGrade}
+                    onScoreChange={handleScoreChange}
+                    onSave={handleSave}
+                    isSaving={isSaving}
+                    readOnly={isReadOnly}
+                  />
+                ) : (
+                  <div className="text-sm text-amber-700 border border-amber-200 bg-amber-50 rounded-md px-4 py-3 text-center">
+                    No components found. Check Mark Distribution settings.
+                  </div>
+                )}
               </>
             )}
             {saveError && <p className="text-sm text-red-500">{saveError}</p>}

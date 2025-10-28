@@ -1,12 +1,16 @@
 ﻿"use client";
 
-import { useMemo, type ChangeEvent } from "react";
-import { type ScoreSheetRow } from "@/contexts/ResultsContext";
+import { type ChangeEvent } from "react";
+import {
+  type ScoreComponentDefinition,
+  type ScoreSheetRow,
+} from "@/contexts/ResultsContext";
 import { gradeColors, type GradeSummary } from "@/lib/grades";
 
 export type ScoreEntryTableProps = {
   rows: ScoreSheetRow[];
   examType: "midterm" | "final";
+  components: ScoreComponentDefinition[];
   resolveGrade: (row: ScoreSheetRow) => GradeSummary;
   onScoreChange: (sheetId: string, componentId: string, value: number) => void;
   onSave: () => void;
@@ -19,48 +23,20 @@ const componentKey = (componentId: string) => componentId;
 const ScoreEntryTable = ({
   rows,
   examType,
+  components,
   resolveGrade,
   onScoreChange,
   onSave,
   isSaving,
   readOnly = false,
 }: ScoreEntryTableProps) => {
-  const componentHeaders = useMemo(() => {
-    const headerMap = new Map<
-      string,
-      { componentId: string; label: string; maxScore: number | null | undefined; order: number }
-    >();
-
-    rows.forEach((row) => {
-      row.components.forEach((component, index) => {
-        const existing = headerMap.get(component.componentId);
-        if (existing) {
-          const nextOrder = Math.min(existing.order, index);
-          const maxScore =
-            existing.maxScore == null && component.maxScore != null
-              ? component.maxScore
-              : existing.maxScore;
-          if (nextOrder !== existing.order || maxScore !== existing.maxScore) {
-            headerMap.set(component.componentId, {
-              componentId: component.componentId,
-              label: existing.label || component.label,
-              maxScore,
-              order: nextOrder,
-            });
-          }
-        } else {
-          headerMap.set(component.componentId, {
-            componentId: component.componentId,
-            label: component.label,
-            maxScore: component.maxScore,
-            order: index,
-          });
-        }
-      });
-    });
-
-    return Array.from(headerMap.values()).sort((a, b) => a.order - b.order);
-  }, [rows]);
+  if (!components.length) {
+    return (
+      <div className="text-sm text-amber-700 text-center py-8">
+        No components found. Check Mark Distribution settings.
+      </div>
+    );
+  }
 
   if (!rows.length) {
     return <div className="text-sm text-gray-500 text-center py-8">No students found for this selection.</div>;
@@ -75,7 +51,7 @@ const ScoreEntryTable = ({
           <thead className="bg-[#F7F8FA] text-xs text-gray-500 uppercase">
             <tr>
               <th className="text-left px-4 py-3">Student</th>
-              {componentHeaders.map((component) => (
+              {components.map((component) => (
                 <th key={componentKey(component.componentId)} className="px-4 py-3 text-center">
                   {component.label}
                   <span className="block text-[10px] text-gray-400">
@@ -103,26 +79,31 @@ const ScoreEntryTable = ({
                       <span className="text-[10px] text-gray-400">{row.subject}</span>
                     </div>
                   </td>
-                  {componentHeaders.map((header) => {
+                  {components.map((definition) => {
                     const component =
                       row.components.find(
-                        (candidate) => candidate.componentId === header.componentId,
+                        (candidate) => candidate.componentId === definition.componentId,
                       ) ?? null;
                     const isMidtermCarry =
-                      examType === "final" && header.componentId === "midtermCarry";
+                      examType === "final" && definition.componentId === "midtermCarry";
                     const value = component?.score ?? 0;
-                    const maxScore = header.maxScore ?? component?.maxScore ?? undefined;
+                    const maxScore =
+                      definition.maxScore ?? component?.maxScore ?? undefined;
 
                     const handleChange = (event: ChangeEvent<HTMLInputElement>) => {
                       if (isMidtermCarry) {
                         return;
                       }
                       const nextValue = Number(event.target.value);
-                      onScoreChange(row.id, header.componentId, Number.isFinite(nextValue) ? nextValue : 0);
+                      onScoreChange(
+                        row.id,
+                        definition.componentId,
+                        Number.isFinite(nextValue) ? nextValue : 0,
+                      );
                     };
 
                     return (
-                      <td key={componentKey(header.componentId)} className="px-4 py-3">
+                      <td key={componentKey(definition.componentId)} className="px-4 py-3">
                         <input
                           type="number"
                           className="w-full rounded-md border border-gray-200 px-2 py-1 text-sm disabled:bg-gray-100 disabled:text-gray-400"
