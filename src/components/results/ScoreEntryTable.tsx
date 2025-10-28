@@ -26,11 +26,40 @@ const ScoreEntryTable = ({
   readOnly = false,
 }: ScoreEntryTableProps) => {
   const componentHeaders = useMemo(() => {
-    const firstRow = rows[0];
-    if (!firstRow) {
-      return [] as ScoreSheetRow["components"];
-    }
-    return firstRow.components;
+    const headerMap = new Map<
+      string,
+      { componentId: string; label: string; maxScore: number | null | undefined; order: number }
+    >();
+
+    rows.forEach((row) => {
+      row.components.forEach((component, index) => {
+        const existing = headerMap.get(component.componentId);
+        if (existing) {
+          const nextOrder = Math.min(existing.order, index);
+          const maxScore =
+            existing.maxScore == null && component.maxScore != null
+              ? component.maxScore
+              : existing.maxScore;
+          if (nextOrder !== existing.order || maxScore !== existing.maxScore) {
+            headerMap.set(component.componentId, {
+              componentId: component.componentId,
+              label: existing.label || component.label,
+              maxScore,
+              order: nextOrder,
+            });
+          }
+        } else {
+          headerMap.set(component.componentId, {
+            componentId: component.componentId,
+            label: component.label,
+            maxScore: component.maxScore,
+            order: index,
+          });
+        }
+      });
+    });
+
+    return Array.from(headerMap.values()).sort((a, b) => a.order - b.order);
   }, [rows]);
 
   if (!rows.length) {
@@ -49,7 +78,9 @@ const ScoreEntryTable = ({
               {componentHeaders.map((component) => (
                 <th key={componentKey(component.componentId)} className="px-4 py-3 text-center">
                   {component.label}
-                  <span className="block text-[10px] text-gray-400">/{component.maxScore}</span>
+                  <span className="block text-[10px] text-gray-400">
+                    /{component.maxScore ?? "?"}
+                  </span>
                 </th>
               ))}
               <th className="px-4 py-3 text-center">{totalsLabel}</th>
@@ -72,27 +103,32 @@ const ScoreEntryTable = ({
                       <span className="text-[10px] text-gray-400">{row.subject}</span>
                     </div>
                   </td>
-                  {row.components.map((component) => {
+                  {componentHeaders.map((header) => {
+                    const component =
+                      row.components.find(
+                        (candidate) => candidate.componentId === header.componentId,
+                      ) ?? null;
                     const isMidtermCarry =
-                      examType === "final" && component.componentId === "midtermCarry";
+                      examType === "final" && header.componentId === "midtermCarry";
+                    const value = component?.score ?? 0;
+                    const maxScore = header.maxScore ?? component?.maxScore ?? undefined;
+
                     const handleChange = (event: ChangeEvent<HTMLInputElement>) => {
                       if (isMidtermCarry) {
                         return;
                       }
-                      onScoreChange(
-                        row.id,
-                        component.componentId,
-                        Number(event.target.value) || 0,
-                      );
+                      const nextValue = Number(event.target.value);
+                      onScoreChange(row.id, header.componentId, Number.isFinite(nextValue) ? nextValue : 0);
                     };
+
                     return (
-                      <td key={componentKey(component.componentId)} className="px-4 py-3">
+                      <td key={componentKey(header.componentId)} className="px-4 py-3">
                         <input
                           type="number"
                           className="w-full rounded-md border border-gray-200 px-2 py-1 text-sm disabled:bg-gray-100 disabled:text-gray-400"
                           min={0}
-                          max={component.maxScore ?? undefined}
-                          value={component.score}
+                          max={maxScore ?? undefined}
+                          value={value}
                           disabled={readOnly || isMidtermCarry}
                           title={
                             isMidtermCarry
