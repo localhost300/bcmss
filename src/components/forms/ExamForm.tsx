@@ -1,6 +1,7 @@
 "use client";
 
 import { zodResolver } from "@hookform/resolvers/zod";
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
@@ -8,6 +9,8 @@ import { z } from "zod";
 import { useSchoolScope } from "@/contexts/SchoolContext";
 import { useSessionScope, useTermScope } from "@/contexts/SessionContext";
 import { buildExamTypeOptions } from "@/lib/exams";
+import type { ExamMarkDistribution } from "@/lib/data";
+import { listMarkDistributions } from "@/lib/services/markDistributions";
 import { getJSON, postJSON } from "@/lib/utils/api";
 import InputField from "../InputField";
 
@@ -125,6 +128,18 @@ const ExamForm = ({ type, data, id, onSuccess }: ExamFormProps) => {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
+  const [markDistributions, setMarkDistributions] = useState<ExamMarkDistribution[]>([]);
+  const [markDistributionLoading, setMarkDistributionLoading] = useState(false);
+  const [markDistributionError, setMarkDistributionError] = useState<string | null>(null);
+
+  const termFilter = useMemo(
+    () =>
+      termScope === "First Term" || termScope === "Second Term" || termScope === "Third Term"
+        ? (termScope as "First Term" | "Second Term" | "Third Term")
+        : undefined,
+    [termScope],
+  );
+
   useEffect(() => {
     let ignore = false;
 
@@ -169,6 +184,42 @@ const ExamForm = ({ type, data, id, onSuccess }: ExamFormProps) => {
     };
   }, [schoolScope, sessionScope]);
 
+  useEffect(() => {
+    let ignore = false;
+
+    setMarkDistributionLoading(true);
+    setMarkDistributionError(null);
+
+    void listMarkDistributions({
+      sessionId: sessionScope ?? undefined,
+      term: termFilter,
+      schoolId: schoolScope ?? undefined,
+    })
+      .then((response) => {
+        if (!ignore) {
+          setMarkDistributions(response);
+        }
+      })
+      .catch((error) => {
+        console.error("[ExamForm] Unable to load mark distributions", error);
+        if (!ignore) {
+          setMarkDistributions([]);
+          setMarkDistributionError(
+            error instanceof Error ? error.message : "Unable to load mark distributions.",
+          );
+        }
+      })
+      .finally(() => {
+        if (!ignore) {
+          setMarkDistributionLoading(false);
+        }
+      });
+
+    return () => {
+      ignore = true;
+    };
+  }, [schoolScope, sessionScope, termFilter]);
+
   const entityId = (data as { id?: number | string } | undefined)?.id ?? id;
 
   const defaultValues = useMemo(
@@ -194,6 +245,7 @@ const ExamForm = ({ type, data, id, onSuccess }: ExamFormProps) => {
     handleSubmit,
     formState: { errors },
     reset,
+    watch,
   } = useForm<Inputs>({
     resolver: zodResolver(schema),
     defaultValues,
@@ -204,6 +256,38 @@ const ExamForm = ({ type, data, id, onSuccess }: ExamFormProps) => {
   }, [defaultValues, reset]);
 
   const optionsReady = classOptions.length > 0 && subjectOptions.length > 0;
+  const examTypeSelection = watch("examType");
+  const resolvedExamType = examTypeSelection === "MIDTERM" ? "midterm" : "final";
+  const selectedDistribution = useMemo(() => {
+    const scoped = markDistributions.find((distribution) => {
+      if (distribution.examType !== resolvedExamType) {
+        return false;
+      }
+      if (sessionScope && distribution.sessionId !== sessionScope) {
+        return false;
+      }
+      if (termFilter && distribution.term !== termFilter) {
+        return false;
+      }
+      return true;
+    });
+    if (scoped) {
+      return scoped;
+    }
+    return (
+      markDistributions.find((distribution) => distribution.examType === resolvedExamType) ?? null
+    );
+  }, [markDistributions, resolvedExamType, sessionScope, termFilter]);
+  const targetExamTypeLabel = resolvedExamType === "midterm" ? "Midterm" : "Final";
+  const distributionComponents = selectedDistribution?.components ?? [];
+  const distributionTotalWeight = useMemo(
+    () =>
+      distributionComponents.reduce(
+        (sum, component) => sum + (Number.isFinite(component.weight) ? component.weight : 0),
+        0,
+      ),
+    [distributionComponents],
+  );
 
   const onSubmit = handleSubmit(async (formData) => {
     const readyForCreate = classOptions.length > 0 && subjectOptions.length > 0;
@@ -428,6 +512,57 @@ const ExamForm = ({ type, data, id, onSuccess }: ExamFormProps) => {
             </span>
           )}
         </label>
+
+        <div className="md:col-span-2 flex flex-col gap-3 rounded-md border border-gray-200 bg-gray-50 p-4 text-xs text-gray-600">
+          <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex flex-col gap-1">
+              <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">
+                Mark Distribution
+              </span>
+              <span className="text-sm font-semibold text-gray-700">
+                {targetExamTypeLabel} assessment template
+              </span>
+            </div>
+            <Link
+              href="/list/exams/mark-distribution"
+              className="self-start rounded-md border border-blue-200 px-3 py-1.5 text-[11px] font-semibold text-blue-600 hover:bg-blue-50"
+            >
+              Manage templates
+            </Link>
+          </div>
+
+          {markDistributionLoading ? (
+            <p className="text-xs text-gray-500">Checking mark distribution...</p>
+          ) : markDistributionError ? (
+            <p className="text-xs text-red-500">{markDistributionError}</p>
+          ) : distributionComponents.length ? (
+            <>
+              {selectedDistribution?.title && (
+                <p className="text-xs text-gray-500">Template: {selectedDistribution.title}</p>
+              )}
+              <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                {distributionComponents.map((component) => (
+                  <li
+                    key={component.id}
+                    className="flex items-center justify-between rounded-md bg-white px-3 py-2 shadow-sm"
+                  >
+                    <span className="text-xs font-medium text-gray-600">{component.label}</span>
+                    <span className="text-xs text-gray-500">{component.weight}</span>
+                  </li>
+                ))}
+              </ul>
+              <div className="text-xs text-gray-500">
+                Total weight:{" "}
+                <span className="font-semibold text-gray-700">{distributionTotalWeight}</span>
+              </div>
+            </>
+          ) : (
+            <p className="text-xs text-gray-500">
+              No mark distribution exists for this exam type yet. Use the manage templates button to
+              set one up before recording scores.
+            </p>
+          )}
+        </div>
       </div>
 
       <div className="flex flex-col gap-2">

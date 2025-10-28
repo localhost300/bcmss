@@ -108,6 +108,10 @@ const ExamDeleteForm = dynamic<DeleteFormProps>(
   () => import("./forms/ExamDeleteForm"),
   { loading: LoadingFallback, ssr: false },
 );
+const MarkDistributionDeleteForm = dynamic<DeleteFormProps>(
+  () => import("./forms/MarkDistributionDeleteForm"),
+  { loading: LoadingFallback, ssr: false },
+);
 
 const FORM_REGISTRY: Partial<
   Record<
@@ -157,6 +161,7 @@ const DELETE_FORM_REGISTRY: Partial<Record<SupportedTable, ComponentType<DeleteF
   teacher: TeacherDeleteForm,
   session: SessionDeleteForm,
   exam: ExamDeleteForm,
+  markDistribution: MarkDistributionDeleteForm,
 };
 
 const ICONS: Record<ModalAction, string> = {

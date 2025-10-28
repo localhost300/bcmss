@@ -208,13 +208,23 @@ const MarkDistributionPage = () => {
             </select>
           </label>
 
-          <FormModal
-            table="markDistribution"
-            type={activeDistribution ? "update" : "create"}
-            data={modalData}
-            id={activeDistribution?.id}
-            onSuccess={handleDistributionSave}
-          />
+          <div className="flex items-center gap-2 self-end">
+            <FormModal
+              table="markDistribution"
+              type={activeDistribution ? "update" : "create"}
+              data={modalData}
+              id={activeDistribution?.id}
+              onSuccess={handleDistributionSave}
+            />
+            {activeDistribution && (
+              <FormModal
+                table="markDistribution"
+                type="delete"
+                id={activeDistribution.id}
+                onSuccess={handleDistributionSave}
+              />
+            )}
+          </div>
         </div>
       </div>
 
