@@ -42,9 +42,22 @@ export async function listMarkDistributions(params: ListParams = {}) {
   if (params.examType) search.set("examType", params.examType);
   if (params.schoolId) search.set("schoolId", params.schoolId);
 
-  const request = getJSON<{ data: ExamMarkDistribution[] }>(
+  const request = getJSON<{ data?: ExamMarkDistribution[]; items?: ExamMarkDistribution[] }>(
     search.size ? `${BASE_URL}?${search.toString()}` : BASE_URL,
-  ).then((response) => response.data);
+  )
+    .then((response) => {
+      if (Array.isArray(response?.data)) {
+        return response.data;
+      }
+      if (Array.isArray(response?.items)) {
+        return response.items;
+      }
+      return [];
+    })
+    .catch((error) => {
+      cache.delete(key);
+      throw error;
+    });
 
   cache.set(key, request);
   return request;
