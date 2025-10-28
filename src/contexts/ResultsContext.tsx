@@ -295,6 +295,26 @@ const clampScore = (value: number, max: number | null | undefined) => {
   return Math.max(0, Math.min(value, max));
 };
 
+const COMPONENT_ORDER: Record<string, number> = {
+  midtermCarry: 0,
+  ca1: 1,
+  classParticipation: 2,
+  quiz: 3,
+  assignment: 4,
+  ca2: 5,
+  exam: 6,
+};
+
+const resolveComponentOrder = (componentId: string, fallback: number) =>
+  COMPONENT_ORDER[componentId] ?? fallback;
+
+const normaliseComponentLabel = (componentId: string, label: string) => {
+  if (componentId === "midtermCarry") {
+    return "Aggregated Midterm Score";
+  }
+  return label;
+};
+
 const findMatchingMarkDistribution = (
   distributions: ExamMarkDistribution[],
   params: { examType: "midterm" | "final"; sessionId: string; term: string },
@@ -1069,8 +1089,9 @@ export const ResultsProvider = ({ children }: ResultsProviderProps) => {
         record.components.forEach((component, index) => {
           const maxScore = component.maxScore ?? null;
           const existing = headerMap.get(component.componentId);
+          const componentOrder = resolveComponentOrder(component.componentId, index);
           if (existing) {
-            const nextOrder = Math.min(existing.order, index);
+            const nextOrder = Math.min(existing.order, componentOrder);
             const resolvedMaxScore =
               existing.maxScore == null && maxScore != null ? maxScore : existing.maxScore;
             const nextLabel = existing.label || component.label;
@@ -1091,16 +1112,11 @@ export const ResultsProvider = ({ children }: ResultsProviderProps) => {
               componentId: component.componentId,
               label: component.label,
               maxScore,
-              order: index,
+              order: componentOrder,
             });
           }
         });
       });
-
-      const headers = Array.from(headerMap.values()).sort((a, b) => a.order - b.order);
-      if (headers.length) {
-        return headers;
-      }
 
       const distribution = findMatchingMarkDistribution(markDistributions, {
         examType: filters.examType,
@@ -1109,12 +1125,38 @@ export const ResultsProvider = ({ children }: ResultsProviderProps) => {
       });
 
       if (distribution) {
-        return distribution.components.map((component, index) => ({
-          componentId: component.id,
-          label: component.label,
-          maxScore: component.weight,
-          order: index,
-        }));
+        const definitions = distribution.components.map((component, index) => {
+          const existing = headerMap.get(component.componentId);
+          const weight = Number.isFinite(component.weight) ? component.weight : null;
+          const order = resolveComponentOrder(component.id, index);
+          return {
+            componentId: component.id,
+            label: normaliseComponentLabel(component.id, component.label),
+            maxScore: existing?.maxScore ?? weight,
+            order,
+          };
+        });
+
+        if (definitions.length === 1 && definitions[0]?.componentId === "exam") {
+          return [];
+        }
+
+        return definitions;
+      }
+
+      const headers = Array.from(headerMap.values())
+        .map((definition) => ({
+          ...definition,
+          label: normaliseComponentLabel(definition.componentId, definition.label),
+          order: resolveComponentOrder(definition.componentId, definition.order),
+        }))
+        .sort((a, b) => a.order - b.order);
+
+      if (headers.length) {
+        if (headers.length === 1 && headers[0]?.componentId === "exam") {
+          return [];
+        }
+        return headers;
       }
 
       return [];
