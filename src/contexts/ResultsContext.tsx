@@ -242,6 +242,18 @@ const mapScoreRecord = (raw: unknown): ScoreRecord => {
 const DEFAULT_MIDTERM_MAX = 50;
 const DEFAULT_FINAL_MAX = 100;
 
+const buildDefaultComponentsForExam = (examType: "midterm" | "final"): ScoreComponent[] => {
+  const maxScore = examType === "midterm" ? DEFAULT_MIDTERM_MAX : DEFAULT_FINAL_MAX;
+  return [
+    {
+      componentId: "exam",
+      label: "Exam",
+      score: 0,
+      maxScore,
+    },
+  ];
+};
+
 type LockInfo = {
   id: number;
   classId: number;
@@ -841,6 +853,11 @@ export const ResultsProvider = ({ children }: ResultsProviderProps) => {
                   return;
                 }
                 orderedExamTypes.forEach((examType) => {
+                  const defaultComponents = buildDefaultComponentsForExam(examType);
+                  const defaultMaxScore =
+                    defaultComponents.reduce((sum, component) => sum + (component.maxScore ?? 0), 0) ||
+                    (examType === "midterm" ? DEFAULT_MIDTERM_MAX : DEFAULT_FINAL_MAX);
+
                   const placeholder: ScoreRecord = {
                     id: `placeholder-${studentId}-${subjectName.replace(/\s+/g, "-").toLowerCase()}-${examType}-${sessionId}-${term}`,
                     studentId,
@@ -854,9 +871,9 @@ export const ResultsProvider = ({ children }: ResultsProviderProps) => {
                     examType,
                     term,
                     sessionId,
-                    components: [],
+                    components: defaultComponents,
                     totalScore: 0,
-                    maxScore: examType === "midterm" ? DEFAULT_MIDTERM_MAX : DEFAULT_FINAL_MAX,
+                    maxScore: defaultMaxScore,
                     percentage: 0,
                   };
 
