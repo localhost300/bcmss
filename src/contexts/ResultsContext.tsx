@@ -1126,7 +1126,7 @@ export const ResultsProvider = ({ children }: ResultsProviderProps) => {
 
       if (distribution) {
         const definitions = distribution.components.map((component, index) => {
-          const existing = headerMap.get(component.componentId);
+          const existing = headerMap.get(component.id);
           const weight = Number.isFinite(component.weight) ? component.weight : null;
           const order = resolveComponentOrder(component.id, index);
           return {
