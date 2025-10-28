@@ -320,18 +320,28 @@ const FALLBACK_COMPONENT_DEFINITIONS: Record<
   ScoreComponentDefinition[]
 > = {
   midterm: [
-    { componentId: "ca1", label: "CA1", maxScore: null, order: resolveComponentOrder("ca1", 0) },
+    {
+      componentId: "ca1",
+      label: "CA1",
+      maxScore: 20,
+      order: resolveComponentOrder("ca1", 0),
+    },
     {
       componentId: "classParticipation",
       label: "Class Participation",
-      maxScore: null,
+      maxScore: 10,
       order: resolveComponentOrder("classParticipation", 1),
     },
-    { componentId: "quiz", label: "Quiz", maxScore: null, order: resolveComponentOrder("quiz", 2) },
+    {
+      componentId: "quiz",
+      label: "Quiz",
+      maxScore: 10,
+      order: resolveComponentOrder("quiz", 2),
+    },
     {
       componentId: "assignment",
       label: "Assignment",
-      maxScore: null,
+      maxScore: 10,
       order: resolveComponentOrder("assignment", 3),
     },
   ],
@@ -339,11 +349,21 @@ const FALLBACK_COMPONENT_DEFINITIONS: Record<
     {
       componentId: "midtermCarry",
       label: normaliseComponentLabel("midtermCarry", "Aggregated Midterm Score"),
-      maxScore: null,
+      maxScore: 20,
       order: resolveComponentOrder("midtermCarry", 0),
     },
-    { componentId: "ca2", label: "CA2", maxScore: null, order: resolveComponentOrder("ca2", 1) },
-    { componentId: "exam", label: "Exam", maxScore: null, order: resolveComponentOrder("exam", 2) },
+    {
+      componentId: "ca2",
+      label: "CA2",
+      maxScore: 20,
+      order: resolveComponentOrder("ca2", 1),
+    },
+    {
+      componentId: "exam",
+      label: "Exam",
+      maxScore: 60,
+      order: resolveComponentOrder("exam", 2),
+    },
   ],
 };
 
