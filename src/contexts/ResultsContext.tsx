@@ -315,6 +315,38 @@ const normaliseComponentLabel = (componentId: string, label: string) => {
   return label;
 };
 
+const FALLBACK_COMPONENT_DEFINITIONS: Record<
+  "midterm" | "final",
+  ScoreComponentDefinition[]
+> = {
+  midterm: [
+    { componentId: "ca1", label: "CA1", maxScore: null, order: resolveComponentOrder("ca1", 0) },
+    {
+      componentId: "classParticipation",
+      label: "Class Participation",
+      maxScore: null,
+      order: resolveComponentOrder("classParticipation", 1),
+    },
+    { componentId: "quiz", label: "Quiz", maxScore: null, order: resolveComponentOrder("quiz", 2) },
+    {
+      componentId: "assignment",
+      label: "Assignment",
+      maxScore: null,
+      order: resolveComponentOrder("assignment", 3),
+    },
+  ],
+  final: [
+    {
+      componentId: "midtermCarry",
+      label: normaliseComponentLabel("midtermCarry", "Aggregated Midterm Score"),
+      maxScore: null,
+      order: resolveComponentOrder("midtermCarry", 0),
+    },
+    { componentId: "ca2", label: "CA2", maxScore: null, order: resolveComponentOrder("ca2", 1) },
+    { componentId: "exam", label: "Exam", maxScore: null, order: resolveComponentOrder("exam", 2) },
+  ],
+};
+
 const findMatchingMarkDistribution = (
   distributions: ExamMarkDistribution[],
   params: { examType: "midterm" | "final"; sessionId: string; term: string },
@@ -1137,8 +1169,11 @@ export const ResultsProvider = ({ children }: ResultsProviderProps) => {
           };
         });
 
+        if (!definitions.length) {
+          return FALLBACK_COMPONENT_DEFINITIONS[filters.examType];
+        }
         if (definitions.length === 1 && definitions[0]?.componentId === "exam") {
-          return [];
+          return FALLBACK_COMPONENT_DEFINITIONS[filters.examType];
         }
 
         return definitions;
@@ -1154,12 +1189,12 @@ export const ResultsProvider = ({ children }: ResultsProviderProps) => {
 
       if (headers.length) {
         if (headers.length === 1 && headers[0]?.componentId === "exam") {
-          return [];
+          return FALLBACK_COMPONENT_DEFINITIONS[filters.examType];
         }
         return headers;
       }
 
-      return [];
+      return FALLBACK_COMPONENT_DEFINITIONS[filters.examType];
     },
     [classRecords, markDistributions],
   );
