@@ -9,10 +9,12 @@ import { z } from "zod";
 import { useSchoolScope } from "@/contexts/SchoolContext";
 import { useSessionScope, useTermScope } from "@/contexts/SessionContext";
 import { buildExamTypeOptions } from "@/lib/exams";
-import type { ExamMarkDistribution } from "@/lib/data";
+import type { ExamMarkComponent, ExamMarkDistribution } from "@/lib/data";
 import { listMarkDistributions } from "@/lib/services/markDistributions";
 import { getJSON, postJSON } from "@/lib/utils/api";
 import InputField from "../InputField";
+
+const EMPTY_MARK_COMPONENTS: ExamMarkComponent[] = [];
 
 const schema = z
   .object({
@@ -279,7 +281,10 @@ const ExamForm = ({ type, data, id, onSuccess }: ExamFormProps) => {
     );
   }, [markDistributions, resolvedExamType, sessionScope, termFilter]);
   const targetExamTypeLabel = resolvedExamType === "midterm" ? "Midterm" : "Final";
-  const distributionComponents = selectedDistribution?.components ?? [];
+  const distributionComponents = useMemo(
+    () => selectedDistribution?.components ?? EMPTY_MARK_COMPONENTS,
+    [selectedDistribution],
+  );
   const distributionTotalWeight = useMemo(
     () =>
       distributionComponents.reduce(

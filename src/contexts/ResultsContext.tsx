@@ -155,6 +155,7 @@ type ResultsContextValue = {
   getLockInfo: (
     filters: ClassFilters & { examType: "midterm" | "final" },
   ) => LockInfo | null;
+  refreshMarkDistributions: () => Promise<void>;
 };
 
 const ResultsContext = createContext<ResultsContextValue | undefined>(
@@ -540,18 +541,52 @@ export const ResultsProvider = ({ children }: ResultsProviderProps) => {
   const [markDistributionLoading, setMarkDistributionLoading] = useState(false);
   const [markDistributionError, setMarkDistributionError] = useState<string | null>(null);
 
+  const fetchMarkDistributions = useCallback(async () => {
+    if (!schoolScope) {
+      return [] as ExamMarkDistribution[];
+    }
+
+    const data = await listMarkDistributions({
+      schoolId: schoolScope,
+      sessionId: sessionScope ?? undefined,
+      term: termScope ?? undefined,
+    });
+    return data;
+  }, [schoolScope, sessionScope, termScope]);
+
+  const refreshMarkDistributions = useCallback(async () => {
+    setMarkDistributionLoading(true);
+    setMarkDistributionError(null);
+    try {
+      if (!schoolScope) {
+        setMarkDistributions([]);
+        return;
+      }
+      const data = await fetchMarkDistributions();
+      setMarkDistributions(data);
+    } catch (error) {
+      console.error("[ResultsContext] Failed to load mark distributions", error);
+      setMarkDistributions([]);
+      setMarkDistributionError("Unable to load mark distributions.");
+    } finally {
+      setMarkDistributionLoading(false);
+    }
+  }, [fetchMarkDistributions, schoolScope]);
+
   useEffect(() => {
     let ignore = false;
 
-    const loadMarkDistributions = async () => {
+    const load = async () => {
       setMarkDistributionLoading(true);
       setMarkDistributionError(null);
       try {
-        const data = await listMarkDistributions({
-          schoolId: schoolScope ?? undefined,
-          sessionId: sessionScope ?? undefined,
-          term: termScope ?? undefined,
-        });
+        if (!schoolScope) {
+          if (!ignore) {
+            setMarkDistributions([]);
+          }
+          return;
+        }
+        const data = await fetchMarkDistributions();
         if (!ignore) {
           setMarkDistributions(data);
         }
@@ -568,11 +603,11 @@ export const ResultsProvider = ({ children }: ResultsProviderProps) => {
       }
     };
 
-    void loadMarkDistributions();
+    void load();
     return () => {
       ignore = true;
     };
-  }, [schoolScope, sessionScope, termScope]);
+  }, [fetchMarkDistributions, schoolScope]);
 
   useEffect(() => {
     setClassRecords((prev) => {
@@ -1552,6 +1587,7 @@ export const ResultsProvider = ({ children }: ResultsProviderProps) => {
       markDistributionLoading,
       markDistributionError,
       getLockInfo,
+      refreshMarkDistributions,
     }),
     [
       classOptions,
@@ -1578,6 +1614,7 @@ export const ResultsProvider = ({ children }: ResultsProviderProps) => {
       markDistributionLoading,
       markDistributionError,
       getLockInfo,
+      refreshMarkDistributions,
     ],
   );
 

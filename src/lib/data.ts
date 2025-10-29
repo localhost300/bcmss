@@ -1494,6 +1494,7 @@ export type ExamMarkDistribution = {
   sessionId: string;
   examType: "midterm" | "final";
   term: "First Term" | "Second Term" | "Third Term";
+  schoolId: string | null;
   components: ExamMarkComponent[];
 };
 
@@ -1504,6 +1505,7 @@ export const examMarkDistributions: ExamMarkDistribution[] = [
     sessionId: "2024-2025",
     examType: "final",
     term: "Second Term",
+    schoolId: "central",
     components: [
       { id: "midtermCarry", label: "Midterm Aggregate", weight: 20 },
       { id: "ca2", label: "CA2", weight: 20 },
@@ -1516,6 +1518,7 @@ export const examMarkDistributions: ExamMarkDistribution[] = [
     sessionId: "2024-2025",
     examType: "midterm",
     term: "Second Term",
+    schoolId: "central",
     components: [
       { id: "ca1", label: "CA1", weight: 20 },
       { id: "quiz", label: "Quiz", weight: 10 },

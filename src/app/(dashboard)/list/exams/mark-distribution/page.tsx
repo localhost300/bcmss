@@ -6,6 +6,8 @@ import AccessRestricted from "@/components/AccessRestricted";
 import FormModal from "@/components/FormModal";
 import Table from "@/components/Table";
 import { useAuth } from "@/contexts/AuthContext";
+import { useResults } from "@/contexts/ResultsContext";
+import { useSchoolScope } from "@/contexts/SchoolContext";
 import { useSessionScope, useTermScope } from "@/contexts/SessionContext";
 import { buildExamTypeOptions, getExamTypeLabel } from "@/lib/exams";
 import type { ExamMarkDistribution, ExamMarkComponent } from "@/lib/data";
@@ -24,6 +26,8 @@ const columns = [
 
 const MarkDistributionPage = () => {
   const { user, loading: authLoading } = useAuth();
+  const { refreshMarkDistributions } = useResults();
+  const schoolScope = useSchoolScope();
   const sessionScope = useSessionScope();
   const termScope = useTermScope();
 
@@ -36,11 +40,37 @@ const MarkDistributionPage = () => {
     setLoadingDistributions(true);
     setDistributionError(null);
     try {
-      const data = await listMarkDistributions({
+      if (!schoolScope) {
+        setDistributions([]);
+        return;
+      }
+
+      const baseParams = {
         sessionId: sessionScope ?? undefined,
         term: termScope ?? undefined,
+      };
+
+      const scoped = await listMarkDistributions({ ...baseParams, schoolId: schoolScope });
+      const relevant = scoped.filter((distribution) => distribution.schoolId === schoolScope);
+
+      const unique = new Map<string, ExamMarkDistribution>();
+      relevant.forEach((distribution) => {
+        const key = `${distribution.sessionId}|${distribution.term}|${distribution.examType}`;
+        const existing = unique.get(key);
+        if (!existing) {
+          unique.set(key, distribution);
+          return;
+        }
+        unique.set(key, distribution);
       });
-      setDistributions(data);
+
+      const ordered = Array.from(unique.values()).sort((a, b) => {
+        if (a.term !== b.term) return a.term.localeCompare(b.term);
+        if (a.sessionId !== b.sessionId) return a.sessionId.localeCompare(b.sessionId);
+        return a.examType.localeCompare(b.examType);
+      });
+
+      setDistributions(ordered);
     } catch (error) {
       console.error("[MarkDistributionPage] Failed to load mark distributions", error);
       setDistributions([]);
@@ -48,7 +78,7 @@ const MarkDistributionPage = () => {
     } finally {
       setLoadingDistributions(false);
     }
-  }, [sessionScope, termScope]);
+  }, [schoolScope, sessionScope, termScope]);
 
   useEffect(() => {
     void loadDistributions();
@@ -61,9 +91,10 @@ const MarkDistributionPage = () => {
           ? distribution.sessionId === sessionScope
           : true;
         const termMatches = termScope ? distribution.term === termScope : true;
-        return sessionMatches && termMatches;
+        const schoolMatches = schoolScope ? distribution.schoolId === schoolScope : true;
+        return sessionMatches && termMatches && schoolMatches;
       }),
-    [distributions, sessionScope, termScope],
+    [distributions, sessionScope, termScope, schoolScope],
   );
 
   const examTypeOptions = useMemo(() => {
@@ -122,7 +153,8 @@ const MarkDistributionPage = () => {
 
   const handleDistributionSave = useCallback(async () => {
     await loadDistributions();
-  }, [loadDistributions]);
+    await refreshMarkDistributions();
+  }, [loadDistributions, refreshMarkDistributions]);
 
   const renderRow = useCallback(
     (component: ExamMarkComponent) => (
@@ -151,9 +183,10 @@ const MarkDistributionPage = () => {
         (distribution) =>
           distribution.examType === resolvedExamType &&
           (sessionScope ? distribution.sessionId === sessionScope : true) &&
-          (termScope ? distribution.term === termScope : true),
+          (termScope ? distribution.term === termScope : true) &&
+          (schoolScope ? distribution.schoolId === schoolScope : true),
       ) ?? null,
-    [distributions, resolvedExamType, sessionScope, termScope],
+    [distributions, resolvedExamType, sessionScope, termScope, schoolScope],
   );
 
   if (authLoading) {
@@ -170,6 +203,14 @@ const MarkDistributionPage = () => {
     );
   }
 
+  if (!schoolScope) {
+    return (
+      <div className="bg-white p-6 rounded-md flex-1 m-4 mt-0 text-sm text-gray-500">
+        Select a school to manage mark distributions.
+      </div>
+    );
+  }
+
   const modalData: Partial<ExamMarkDistribution> =
     activeDistribution ?? {
       examType: resolvedExamType,
@@ -177,6 +218,7 @@ const MarkDistributionPage = () => {
       term: termScope ?? "First Term",
       components: templateForResolvedType?.components ?? [],
       title: `${termScope ?? "Term"} ${getExamTypeLabel(resolvedExamType)}`,
+      schoolId: schoolScope,
     };
 
   return (

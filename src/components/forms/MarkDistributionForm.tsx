@@ -8,6 +8,7 @@ import {
   listMarkDistributions,
   upsertMarkDistribution,
 } from "@/lib/services/markDistributions";
+import { useSchoolScope } from "@/contexts/SchoolContext";
 
 type DistributionType = ExamMarkDistribution["examType"];
 
@@ -44,6 +45,7 @@ const cloneComponents = (components: ExamMarkComponent[] | undefined): EditableC
   }));
 
 const MarkDistributionForm = ({ type, data, onSuccess }: MarkDistributionFormProps) => {
+  const schoolScope = useSchoolScope();
   const [catalogue, setCatalogue] = useState<ExamMarkDistribution[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -55,13 +57,34 @@ const MarkDistributionForm = ({ type, data, onSuccess }: MarkDistributionFormPro
       setLoading(true);
       setLoadError(null);
       try {
-        const distributions = await listMarkDistributions({
+        const targetSchool = data?.schoolId ?? schoolScope;
+        if (!targetSchool) {
+          setCatalogue([]);
+          return;
+        }
+
+        const baseParams = {
           sessionId: data?.sessionId,
           term: data?.term as "First Term" | "Second Term" | "Third Term" | undefined,
+          schoolId: targetSchool,
+        };
+
+        const scoped = await listMarkDistributions(baseParams);
+        if (ignore) return;
+
+        const relevant = scoped.filter(
+          (distribution) => distribution.schoolId === targetSchool,
+        );
+
+        const unique = new Map<string, ExamMarkDistribution>();
+        relevant.forEach((distribution) => {
+          const key = `${distribution.sessionId}|${distribution.term}|${distribution.examType}`;
+          if (!unique.has(key)) {
+            unique.set(key, distribution);
+          }
         });
-        if (!ignore) {
-          setCatalogue(distributions);
-        }
+
+        setCatalogue(Array.from(unique.values()));
       } catch (error) {
         console.error("[MarkDistributionForm] Failed to load templates", error);
         if (!ignore) {
@@ -79,13 +102,18 @@ const MarkDistributionForm = ({ type, data, onSuccess }: MarkDistributionFormPro
     return () => {
       ignore = true;
     };
-  }, [data?.sessionId, data?.term]);
+  }, [data?.schoolId, data?.sessionId, data?.term, schoolScope]);
 
   const examTypeOptions = useMemo(() => {
     const scoped = catalogue.filter((distribution) => {
       const matchesSession = data?.sessionId ? distribution.sessionId === data.sessionId : true;
       const matchesTerm = data?.term ? distribution.term === data.term : true;
-      return matchesSession && matchesTerm;
+      const matchesSchool = data?.schoolId
+        ? distribution.schoolId === data.schoolId
+        : schoolScope
+        ? distribution.schoolId === schoolScope
+        : true;
+      return matchesSession && matchesTerm && matchesSchool;
     });
 
     const source = scoped.length > 0 ? scoped : catalogue;
@@ -99,7 +127,7 @@ const MarkDistributionForm = ({ type, data, onSuccess }: MarkDistributionFormPro
     typeSet.add("midterm");
 
     return buildExamTypeOptions(Array.from(typeSet));
-  }, [catalogue, data?.examType, data?.sessionId, data?.term]);
+  }, [catalogue, data?.examType, data?.schoolId, data?.sessionId, data?.term, schoolScope]);
 
   const initialExamType = useMemo(() => {
     const preferred = isDistributionType(data?.examType) ? data.examType : null;
@@ -119,16 +147,19 @@ const MarkDistributionForm = ({ type, data, onSuccess }: MarkDistributionFormPro
   }, [initialExamType]);
 
   const findTemplate = useCallback(
-    (targetExamType: DistributionType) =>
-      catalogue.find(
-        (distribution) =>
-          distribution.examType === targetExamType &&
-          (data?.sessionId ? distribution.sessionId === data.sessionId : true) &&
-          (data?.term ? distribution.term === data.term : true),
-      ) ??
-      catalogue.find((distribution) => distribution.examType === targetExamType) ??
-      null,
-    [catalogue, data?.sessionId, data?.term],
+    (targetExamType: DistributionType) => {
+      const targetSchool = data?.schoolId ?? schoolScope;
+      return (
+        catalogue.find(
+          (distribution) =>
+            distribution.examType === targetExamType &&
+            (data?.sessionId ? distribution.sessionId === data.sessionId : true) &&
+            (data?.term ? distribution.term === data.term : true) &&
+            (targetSchool ? distribution.schoolId === targetSchool : true),
+        ) ?? null
+      );
+    },
+    [catalogue, data?.schoolId, data?.sessionId, data?.term, schoolScope],
   );
 
   const [components, setComponents] = useState<EditableComponent[]>(() => {
@@ -245,6 +276,12 @@ const MarkDistributionForm = ({ type, data, onSuccess }: MarkDistributionFormPro
       return;
     }
 
+    const targetSchool = data?.schoolId ?? schoolScope;
+    if (!targetSchool) {
+      setError("Select a school before saving.");
+      return;
+    }
+
     setSaving(true);
     try {
       const payload: ExamMarkDistribution = {
@@ -256,6 +293,7 @@ const MarkDistributionForm = ({ type, data, onSuccess }: MarkDistributionFormPro
         sessionId: data.sessionId,
         term: (data?.term ?? "First Term") as ExamMarkDistribution["term"],
         examType,
+        schoolId: targetSchool,
         components: components.map((component, index) => ({
           id: component.id,
           label: component.label,

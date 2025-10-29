@@ -60,6 +60,7 @@ const mapDistribution = (
     term: "FIRST" | "SECOND" | "THIRD";
     examType: "MIDTERM" | "FINAL";
     title: string;
+    schoolId: string | null;
   },
 ) => ({
   id: distribution.id,
@@ -67,6 +68,7 @@ const mapDistribution = (
   term: termEnumToLabel[distribution.term],
   examType: examTypeEnumToLabel[distribution.examType],
   title: distribution.title,
+  schoolId: distribution.schoolId,
   components: distribution.components
     .sort((a, b) => a.order - b.order)
     .map((component) => ({
