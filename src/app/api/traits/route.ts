@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { currentUser } from "@clerk/nextjs/server";
 import { StudentTrait } from "@prisma/client";
 import { z } from "zod";
 
@@ -77,10 +78,44 @@ export async function POST(request: Request) {
       }
     }
 
-    const createdBy = await prisma.user.findUnique({
-      where: { clerkId: actor.clerkUserId },
-      select: { id: true },
-    });
+    let createdBy = actor.clerkUserId
+      ? await prisma.user.findUnique({
+          where: { clerkId: actor.clerkUserId },
+          select: { id: true },
+        })
+      : null;
+
+    if (!createdBy && actor.clerkUserId) {
+      const resolvedRole: "admin" | "teacher" = actor.isAdmin ? "admin" : "teacher";
+      const clerkProfile = await currentUser().catch(() => null);
+      const primaryEmail =
+        clerkProfile?.emailAddresses?.[0]?.emailAddress ??
+        (clerkProfile?.primaryEmailAddress?.emailAddress ?? null);
+      const fallbackEmail = `${actor.clerkUserId}@no-email.local`;
+      const email = primaryEmail?.trim() ? primaryEmail : fallbackEmail;
+
+      const firstName = clerkProfile?.firstName ?? null;
+      const lastName = clerkProfile?.lastName ?? null;
+
+      createdBy = await prisma.user.upsert({
+        where: { email },
+        update: {
+          clerkId: actor.clerkUserId,
+          firstName,
+          lastName,
+          role: resolvedRole,
+        },
+        create: {
+          email,
+          clerkId: actor.clerkUserId,
+          firstName,
+          lastName,
+          role: resolvedRole,
+        },
+        select: { id: true },
+      });
+    }
+
     if (!createdBy) {
       return NextResponse.json(
         { message: "Unable to resolve the requesting user within the application." },
