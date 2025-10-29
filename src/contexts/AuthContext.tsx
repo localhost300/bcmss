@@ -46,11 +46,22 @@ const mapClerkUser = (clerkUser: ReturnType<typeof useUser>["user"]): CurrentUse
   const email = clerkUser.emailAddresses?.[0]?.emailAddress ?? "";
   const metadata = (clerkUser.publicMetadata ?? {}) as Record<string, unknown>;
 
-  const roleValue = metadata.role;
-  const role: UserRole =
-    roleValue === "admin" || roleValue === "teacher" || roleValue === "student" || roleValue === "parent"
-      ? roleValue
-      : "teacher";
+  const rawRole = typeof metadata.role === "string" ? metadata.role : null;
+  const normalisedRole = rawRole?.toLowerCase() ?? "";
+  const roleMap: Record<string, UserRole> = {
+    admin: "admin",
+    administrator: "admin",
+    superadmin: "admin",
+    owner: "admin",
+    teacher: "teacher",
+    instructor: "teacher",
+    student: "student",
+    learner: "student",
+    pupil: "student",
+    parent: "parent",
+    guardian: "parent",
+  };
+  const role = roleMap[normalisedRole] ?? "teacher";
 
   return {
     id: clerkUser.id,
