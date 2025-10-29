@@ -316,58 +316,6 @@ const normaliseComponentLabel = (componentId: string, label: string) => {
   return label;
 };
 
-const FALLBACK_COMPONENT_DEFINITIONS: Record<
-  "midterm" | "final",
-  ScoreComponentDefinition[]
-> = {
-  midterm: [
-    {
-      componentId: "ca1",
-      label: "CA1",
-      maxScore: 20,
-      order: resolveComponentOrder("ca1", 0),
-    },
-    {
-      componentId: "classParticipation",
-      label: "Class Participation",
-      maxScore: 10,
-      order: resolveComponentOrder("classParticipation", 1),
-    },
-    {
-      componentId: "quiz",
-      label: "Quiz",
-      maxScore: 10,
-      order: resolveComponentOrder("quiz", 2),
-    },
-    {
-      componentId: "assignment",
-      label: "Assignment",
-      maxScore: 10,
-      order: resolveComponentOrder("assignment", 3),
-    },
-  ],
-  final: [
-    {
-      componentId: "midtermCarry",
-      label: normaliseComponentLabel("midtermCarry", "Aggregated Midterm Score"),
-      maxScore: 20,
-      order: resolveComponentOrder("midtermCarry", 0),
-    },
-    {
-      componentId: "ca2",
-      label: "CA2",
-      maxScore: 20,
-      order: resolveComponentOrder("ca2", 1),
-    },
-    {
-      componentId: "exam",
-      label: "Exam",
-      maxScore: 60,
-      order: resolveComponentOrder("exam", 2),
-    },
-  ],
-};
-
 const findMatchingMarkDistribution = (
   distributions: ExamMarkDistribution[],
   params: { examType: "midterm" | "final"; sessionId: string; term: string },
@@ -1224,32 +1172,10 @@ export const ResultsProvider = ({ children }: ResultsProviderProps) => {
           };
         });
 
-        if (!definitions.length) {
-          return FALLBACK_COMPONENT_DEFINITIONS[filters.examType];
-        }
-        if (definitions.length === 1 && definitions[0]?.componentId === "exam") {
-          return FALLBACK_COMPONENT_DEFINITIONS[filters.examType];
-        }
-
         return definitions;
       }
 
-      const headers = Array.from(headerMap.values())
-        .map((definition) => ({
-          ...definition,
-          label: normaliseComponentLabel(definition.componentId, definition.label),
-          order: resolveComponentOrder(definition.componentId, definition.order),
-        }))
-        .sort((a, b) => a.order - b.order);
-
-      if (headers.length) {
-        if (headers.length === 1 && headers[0]?.componentId === "exam") {
-          return FALLBACK_COMPONENT_DEFINITIONS[filters.examType];
-        }
-        return headers;
-      }
-
-      return FALLBACK_COMPONENT_DEFINITIONS[filters.examType];
+      return [];
     },
     [classRecords, markDistributions],
   );
