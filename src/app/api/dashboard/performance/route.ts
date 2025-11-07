@@ -3,6 +3,7 @@ import { Prisma } from "@prisma/client";
 import { z } from "zod";
 
 import prisma from "@/lib/prisma";
+import { isDatabaseUnavailableError } from "@/lib/prisma-errors";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -335,6 +336,14 @@ export async function GET(request: NextRequest) {
       },
     });
   } catch (error) {
+    if (isDatabaseUnavailableError(error)) {
+      console.warn(
+        "[DashboardPerformance] Database unavailable, returning empty response",
+        error,
+      );
+      return NextResponse.json(emptyResponse);
+    }
+
     console.error("[DashboardPerformance] Failed to load insights", error);
     return NextResponse.json(
       { message: "Unable to load performance insights." },

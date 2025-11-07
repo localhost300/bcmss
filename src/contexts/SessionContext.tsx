@@ -22,6 +22,9 @@ export type ClientSession = {
   startDate: string;
   endDate: string;
   isCurrent: boolean;
+  firstTermStart: string;
+  secondTermStart: string;
+  thirdTermStart: string;
 };
 
 type SessionFormInput = {
@@ -30,6 +33,9 @@ type SessionFormInput = {
   startDate: string;
   endDate: string;
   isCurrent?: boolean;
+  firstTermStart?: string | null;
+  secondTermStart?: string | null;
+  thirdTermStart?: string | null;
 };
 
 type SessionContextValue = {
@@ -55,6 +61,9 @@ type SessionListResponse = {
     startDate?: unknown;
     endDate?: unknown;
     isCurrent?: unknown;
+    firstTermStart?: unknown;
+    secondTermStart?: unknown;
+    thirdTermStart?: unknown;
   }>;
 };
 
@@ -100,6 +109,9 @@ const asClientSession = (value: unknown): ClientSession | null => {
     startDate: formatDate(record.startDate),
     endDate: formatDate(record.endDate),
     isCurrent: Boolean(record.isCurrent),
+    firstTermStart: formatDate(record.firstTermStart),
+    secondTermStart: formatDate(record.secondTermStart),
+    thirdTermStart: formatDate(record.thirdTermStart),
   };
 };
 
@@ -179,7 +191,16 @@ export const SessionProvider = ({ children }: { children: React.ReactNode }) => 
   }, []);
 
   const addSession = useCallback(
-    async ({ id, name, startDate, endDate, isCurrent }: SessionFormInput) => {
+    async ({
+      id,
+      name,
+      startDate,
+      endDate,
+      isCurrent,
+      firstTermStart,
+      secondTermStart,
+      thirdTermStart,
+    }: SessionFormInput) => {
       if (!canManageSessions) {
         return;
       }
@@ -189,6 +210,9 @@ export const SessionProvider = ({ children }: { children: React.ReactNode }) => 
         startDate,
         endDate,
         isCurrent: Boolean(isCurrent),
+        firstTermStart: firstTermStart ?? "",
+        secondTermStart: secondTermStart ?? "",
+        thirdTermStart: thirdTermStart ?? "",
         action: "create" as const,
       });
       await refreshSessions();
@@ -197,7 +221,16 @@ export const SessionProvider = ({ children }: { children: React.ReactNode }) => 
   );
 
   const updateSession = useCallback(
-    async ({ id, name, startDate, endDate, isCurrent }: SessionFormInput & { id: string }) => {
+    async ({
+      id,
+      name,
+      startDate,
+      endDate,
+      isCurrent,
+      firstTermStart,
+      secondTermStart,
+      thirdTermStart,
+    }: SessionFormInput & { id: string }) => {
       if (!canManageSessions) {
         return;
       }
@@ -207,6 +240,9 @@ export const SessionProvider = ({ children }: { children: React.ReactNode }) => 
         startDate,
         endDate,
         isCurrent: Boolean(isCurrent),
+        firstTermStart: firstTermStart ?? "",
+        secondTermStart: secondTermStart ?? "",
+        thirdTermStart: thirdTermStart ?? "",
         action: "update" as const,
       });
       await refreshSessions();

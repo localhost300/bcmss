@@ -3,6 +3,7 @@ import { Prisma, Term } from "@prisma/client";
 import { z } from "zod";
 
 import prisma from "@/lib/prisma";
+import { isDatabaseUnavailableError } from "@/lib/prisma-errors";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -122,6 +123,20 @@ export async function GET(request: NextRequest) {
       },
     });
   } catch (error) {
+    if (isDatabaseUnavailableError(error)) {
+      console.warn(
+        "[DashboardExamSummary] Database unavailable, returning zeroed stats",
+        error,
+      );
+      return NextResponse.json({
+        data: {
+          scheduledCount: 0,
+          distributionCount: 0,
+          midtermCount: 0,
+        },
+      });
+    }
+
     console.error("[DashboardExamSummary] Failed to load data", error);
     return NextResponse.json(
       { message: "Unable to load exam summaries." },

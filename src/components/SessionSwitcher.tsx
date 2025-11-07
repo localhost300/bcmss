@@ -86,7 +86,27 @@ const SessionSwitcher = () => {
         </select>
       </div>
       {canManageSessions && (
-        <FormModal table="session" type="create" onSuccess={refreshSessions} />
+        <>
+          <FormModal table="session" type="create" onSuccess={refreshSessions} />
+          {activeSession && (
+            <FormModal
+              table="session"
+              type="update"
+              id={activeSession.id}
+              data={{
+                id: activeSession.id,
+                name: activeSession.name,
+                startDate: activeSession.startDate,
+                endDate: activeSession.endDate,
+                isCurrent: activeSession.isCurrent,
+                firstTermStart: activeSession.firstTermStart,
+                secondTermStart: activeSession.secondTermStart,
+                thirdTermStart: activeSession.thirdTermStart,
+              }}
+              onSuccess={refreshSessions}
+            />
+          )}
+        </>
       )}
     </div>
   );

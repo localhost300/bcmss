@@ -6,7 +6,10 @@ import { deleteSchool, updateSchool } from "@/lib/services/schools";
 import { schoolUpdateSchema } from "@/lib/validation/schools";
 import { InvalidIdError, NotFoundError } from "@/lib/services/errors";
 
-const idSchema = z.string().uuid();
+const idSchema = z
+  .string()
+  .trim()
+  .min(1, "School id is required.");
 const formatZodError = (error: z.ZodError) => ({
   message: "Invalid request.",
   errors: error.flatten().fieldErrors,

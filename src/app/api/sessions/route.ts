@@ -23,6 +23,20 @@ const dateSchema = z
     message: "Invalid date.",
   });
 
+const optionalDateField = z
+  .string()
+  .trim()
+  .optional()
+  .refine(
+    (value) => {
+      if (!value || value.trim() === "") {
+        return true;
+      }
+      return !Number.isNaN(new Date(value).getTime());
+    },
+    { message: "Invalid date." },
+  );
+
 const payloadSchema = z.object({
   action: z.enum(["create", "update"]),
   id: z.union([z.string().trim().min(1), z.number().int().positive()]).optional(),
@@ -30,6 +44,9 @@ const payloadSchema = z.object({
   startDate: dateSchema,
   endDate: dateSchema,
   isCurrent: z.coerce.boolean().optional(),
+  firstTermStart: optionalDateField,
+  secondTermStart: optionalDateField,
+  thirdTermStart: optionalDateField,
 });
 
 const normaliseFilters = (raw: Record<string, string | undefined>) => {
@@ -44,6 +61,18 @@ const normaliseFilters = (raw: Record<string, string | undefined>) => {
 
 const normalisePayload = (raw: unknown) => {
   const parsed = payloadSchema.parse(raw);
+  const toDateOrNull = (value?: string) => {
+    if (!value) {
+      return null;
+    }
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return null;
+    }
+    const next = new Date(trimmed);
+    return Number.isNaN(next.getTime()) ? null : next;
+  };
+
   return {
     action: parsed.action,
     id: parsed.id === undefined ? undefined : String(parsed.id),
@@ -51,6 +80,11 @@ const normalisePayload = (raw: unknown) => {
     startDate: new Date(parsed.startDate),
     endDate: new Date(parsed.endDate),
     isCurrent: parsed.isCurrent ?? false,
+    termStarts: {
+      firstTermStart: toDateOrNull(parsed.firstTermStart),
+      secondTermStart: toDateOrNull(parsed.secondTermStart),
+      thirdTermStart: toDateOrNull(parsed.thirdTermStart),
+    },
   };
 };
 export async function GET(request: NextRequest) {
@@ -90,6 +124,7 @@ export async function POST(request: NextRequest) {
       startDate: payload.startDate,
       endDate: payload.endDate,
       isCurrent: payload.isCurrent,
+      termStarts: payload.termStarts,
     };
 
     if (payload.action === "create") {

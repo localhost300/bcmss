@@ -58,10 +58,10 @@ const baseMenuSections: MenuSection[] = [
         visible: ["admin"],
       },
       {
-        icon: "/lesson.png",
-        label: "Lessons",
-        href: "/list/lessons",
-        visible: ["admin"],
+        icon: "/attendance.png",
+        label: "Attendance",
+        href: "/list/attendance",
+        visible: ["admin", "teacher"],
       },
       {
         icon: "/exam.png",
@@ -126,7 +126,7 @@ const baseMenuSections: MenuSection[] = [
         ],
       },
       {
-        icon: "/attendance.png",
+        icon: "/report.png",
         label: "Trait Ratings",
         href: "/traits",
         visible: ["admin", "teacher"],

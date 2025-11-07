@@ -2,6 +2,7 @@ import { Prisma, School } from "@prisma/client";
 import { randomUUID } from "node:crypto";
 
 import prisma from "@/lib/prisma";
+import { isDatabaseUnavailableError } from "@/lib/prisma-errors";
 import { NotFoundError } from "./errors";
 import { deleteClassCascade } from "./classes";
 import { deleteSubjectCascade } from "./subjects";
@@ -218,11 +219,7 @@ export async function listSchools(
       },
     };
   } catch (error) {
-    const isDatabaseOffline =
-      error instanceof Prisma.PrismaClientInitializationError ||
-      (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P1001");
-
-    if (isDatabaseOffline) {
+    if (isDatabaseUnavailableError(error)) {
       console.warn(
         "[Schools service] Falling back to local seed data because the database is unavailable.",
       );

@@ -1,7 +1,8 @@
 import crypto from "node:crypto";
-import { AcademicSession, Prisma } from "@prisma/client";
+import { AcademicSession, Prisma, PrismaClient, Term } from "@prisma/client";
 
 import prisma from "@/lib/prisma";
+import { isDatabaseUnavailableError } from "@/lib/prisma-errors";
 import { InvalidIdError, NotFoundError } from "./errors";
 import { coerceToStringId } from "./utils";
 import { deleteExamCascade } from "./exams";
@@ -9,7 +10,7 @@ import { deleteExamCascade } from "./exams";
 const DEFAULT_PAGE_SIZE = 20;
 const MAX_PAGE_SIZE = 500;
 
-const FALLBACK_SESSIONS: ReadonlyArray<AcademicSession> = Object.freeze([
+const FALLBACK_SESSIONS: ReadonlyArray<SessionListItem> = Object.freeze([
   {
     id: "2024-2025",
     name: "2024/2025 Academic Session",
@@ -18,6 +19,9 @@ const FALLBACK_SESSIONS: ReadonlyArray<AcademicSession> = Object.freeze([
     isCurrent: true,
     createdAt: new Date("2024-09-01T00:00:00.000Z"),
     updatedAt: new Date("2024-09-01T00:00:00.000Z"),
+    firstTermStart: null,
+    secondTermStart: null,
+    thirdTermStart: null,
   },
   {
     id: "2023-2024",
@@ -27,8 +31,17 @@ const FALLBACK_SESSIONS: ReadonlyArray<AcademicSession> = Object.freeze([
     isCurrent: false,
     createdAt: new Date("2023-09-01T00:00:00.000Z"),
     updatedAt: new Date("2024-07-15T00:00:00.000Z"),
+    firstTermStart: null,
+    secondTermStart: null,
+    thirdTermStart: null,
   },
 ]);
+
+type TermStartMap = {
+  firstTermStart?: Date | null;
+  secondTermStart?: Date | null;
+  thirdTermStart?: Date | null;
+};
 
 type SaveSessionInput = {
   id?: string;
@@ -36,6 +49,7 @@ type SaveSessionInput = {
   startDate: Date;
   endDate: Date;
   isCurrent?: boolean;
+  termStarts?: TermStartMap;
 };
 
 type ListSessionsFilters = {
@@ -45,8 +59,14 @@ type ListSessionsFilters = {
   isCurrent?: boolean;
 };
 
+type SessionListItem = AcademicSession & {
+  firstTermStart: Date | null;
+  secondTermStart: Date | null;
+  thirdTermStart: Date | null;
+};
+
 type ListSessionsResult = {
-  items: AcademicSession[];
+  items: SessionListItem[];
   pagination: {
     page: number;
     pageSize: number;
@@ -77,6 +97,74 @@ const sanitizePaging = ({
   return { page: safePage, pageSize: safePageSize };
 };
 
+type PrismaSessionWithTerms = Prisma.AcademicSessionGetPayload<{
+  include: { termSchedules: true };
+}>;
+
+const TERM_KEY_ORDER: Array<{ key: keyof TermStartMap; term: Term }> = [
+  { key: "firstTermStart", term: Term.FIRST },
+  { key: "secondTermStart", term: Term.SECOND },
+  { key: "thirdTermStart", term: Term.THIRD },
+];
+
+const toSessionListItem = (record: PrismaSessionWithTerms): SessionListItem => {
+  const { termSchedules, ...session } = record;
+
+  const lookup = {
+    [Term.FIRST]: null as Date | null,
+    [Term.SECOND]: null as Date | null,
+    [Term.THIRD]: null as Date | null,
+  };
+
+  termSchedules.forEach((schedule) => {
+    lookup[schedule.term] = schedule.startsAt;
+  });
+
+  return {
+    ...session,
+    firstTermStart: lookup[Term.FIRST],
+    secondTermStart: lookup[Term.SECOND],
+    thirdTermStart: lookup[Term.THIRD],
+  };
+};
+
+type PrismaClientOrTransaction = PrismaClient | Prisma.TransactionClient;
+
+const applyTermStarts = async (
+  client: PrismaClientOrTransaction,
+  sessionId: string,
+  termStarts?: TermStartMap,
+): Promise<void> => {
+  await client.academicTermSchedule.deleteMany({ where: { sessionId } });
+
+  if (!termStarts) {
+    return;
+  }
+
+  const entries = TERM_KEY_ORDER.flatMap(({ key, term }) => {
+    const startsAt = termStarts[key];
+    if (!startsAt) {
+      return [];
+    }
+    return [
+      {
+        sessionId,
+        term,
+        startsAt,
+      },
+    ];
+  });
+
+  if (entries.length === 0) {
+    return;
+  }
+
+  await client.academicTermSchedule.createMany({
+    data: entries,
+    skipDuplicates: true,
+  });
+};
+
 export async function listSessions(filters: ListSessionsFilters = {}): Promise<ListSessionsResult> {
   const { page, pageSize } = sanitizePaging(filters);
   const { search, isCurrent } = filters;
@@ -102,6 +190,7 @@ export async function listSessions(filters: ListSessionsFilters = {}): Promise<L
       prisma.academicSession.findMany({
         where,
         orderBy: [{ startDate: "desc" }],
+        include: { termSchedules: true },
         skip,
         take: pageSize,
       }),
@@ -132,7 +221,7 @@ export async function listSessions(filters: ListSessionsFilters = {}): Promise<L
     const totalPages = Math.max(Math.ceil(totalItems / pageSize), 1);
     const safePage = Math.min(page, totalPages);
     const start = (safePage - 1) * pageSize;
-    const items = filtered.slice(start, start + pageSize);
+    const items = filtered.slice(start, start + pageSize).map((session) => ({ ...session }));
 
     return {
       items,
@@ -146,9 +235,10 @@ export async function listSessions(filters: ListSessionsFilters = {}): Promise<L
   };
 
   try {
-    const [items, totalItems] = await runDbQuery();
+    const [records, totalItems] = await runDbQuery();
 
     const totalPages = Math.max(Math.ceil(totalItems / pageSize), 1);
+    const items = (records as PrismaSessionWithTerms[]).map(toSessionListItem);
 
     return {
       items,
@@ -160,17 +250,12 @@ export async function listSessions(filters: ListSessionsFilters = {}): Promise<L
       },
     };
   } catch (error) {
-    const isDatabaseOffline =
-      error instanceof Prisma.PrismaClientInitializationError ||
-      (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P1001");
-
-    if (isDatabaseOffline) {
+    if (isDatabaseUnavailableError(error)) {
       console.warn(
         "[Sessions service] Falling back to local seed data because the database is unavailable.",
       );
       return buildFallbackResult();
     }
-
     throw error;
   }
 }
@@ -178,18 +263,24 @@ export async function listSessions(filters: ListSessionsFilters = {}): Promise<L
 export async function createSession(input: SaveSessionInput): Promise<AcademicSession> {
   const id = buildSessionId(input.id);
 
-  if (normaliseFlag(input.isCurrent)) {
-    await prisma.academicSession.updateMany({ data: { isCurrent: false } });
-  }
+  return prisma.$transaction(async (tx) => {
+    if (normaliseFlag(input.isCurrent)) {
+      await tx.academicSession.updateMany({ data: { isCurrent: false } });
+    }
 
-  return prisma.academicSession.create({
-    data: {
-      id,
-      name: input.name.trim(),
-      startDate: input.startDate,
-      endDate: input.endDate,
-      isCurrent: normaliseFlag(input.isCurrent),
-    },
+    const session = await tx.academicSession.create({
+      data: {
+        id,
+        name: input.name.trim(),
+        startDate: input.startDate,
+        endDate: input.endDate,
+        isCurrent: normaliseFlag(input.isCurrent),
+      },
+    });
+
+    await applyTermStarts(tx, session.id, input.termStarts);
+
+    return session;
   });
 }
 
@@ -201,19 +292,27 @@ export async function updateSession(
     throw new InvalidIdError("Session id is required.");
   }
 
-  try {
-    if (normaliseFlag(input.isCurrent)) {
-      await prisma.academicSession.updateMany({ data: { isCurrent: false } });
-    }
+  const sessionId = id.trim();
 
-    return await prisma.academicSession.update({
-      where: { id: id.trim() },
-      data: {
-        name: input.name.trim(),
-        startDate: input.startDate,
-        endDate: input.endDate,
-        isCurrent: normaliseFlag(input.isCurrent),
-      },
+  try {
+    return await prisma.$transaction(async (tx) => {
+      if (normaliseFlag(input.isCurrent)) {
+        await tx.academicSession.updateMany({ data: { isCurrent: false } });
+      }
+
+      const session = await tx.academicSession.update({
+        where: { id: sessionId },
+        data: {
+          name: input.name.trim(),
+          startDate: input.startDate,
+          endDate: input.endDate,
+          isCurrent: normaliseFlag(input.isCurrent),
+        },
+      });
+
+      await applyTermStarts(tx, session.id, input.termStarts);
+
+      return session;
     });
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2025") {

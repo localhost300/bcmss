@@ -11,6 +11,9 @@ const schema = z.object({
   startDate: z.string().min(1, { message: "Start date is required!" }),
   endDate: z.string().min(1, { message: "End date is required!" }),
   isCurrent: z.boolean().optional(),
+  firstTermStart: z.string().optional(),
+  secondTermStart: z.string().optional(),
+  thirdTermStart: z.string().optional(),
 });
 
 type Inputs = z.infer<typeof schema>;
@@ -36,6 +39,9 @@ const SessionForm = ({ type, data, id, onSuccess }: SessionFormProps) => {
       startDate: data?.startDate ?? "",
       endDate: data?.endDate ?? "",
       isCurrent: data?.isCurrent ?? false,
+      firstTermStart: data?.firstTermStart ?? "",
+      secondTermStart: data?.secondTermStart ?? "",
+      thirdTermStart: data?.thirdTermStart ?? "",
     }),
     [data],
   );
@@ -85,6 +91,9 @@ const SessionForm = ({ type, data, id, onSuccess }: SessionFormProps) => {
           startDate: "",
           endDate: "",
           isCurrent: false,
+          firstTermStart: "",
+          secondTermStart: "",
+          thirdTermStart: "",
         });
       }
 
@@ -123,14 +132,38 @@ const SessionForm = ({ type, data, id, onSuccess }: SessionFormProps) => {
           name="endDate"
           type="date"
           register={register}
-          error={errors.endDate?.message}
-          defaultValue={defaultValues.endDate}
-        />
-        <label className="flex items-center gap-2 text-xs text-gray-500 mt-2">
-          <input type="checkbox" {...register("isCurrent")} defaultChecked={defaultValues.isCurrent} />
-          <span>Mark as current session</span>
-        </label>
-      </div>
+      error={errors.endDate?.message}
+      defaultValue={defaultValues.endDate}
+    />
+    <InputFieldWithError
+      label="First Term Starts"
+      name="firstTermStart"
+      type="date"
+      register={register}
+      error={errors.firstTermStart?.message}
+      defaultValue={defaultValues.firstTermStart}
+    />
+    <InputFieldWithError
+      label="Second Term Starts"
+      name="secondTermStart"
+      type="date"
+      register={register}
+      error={errors.secondTermStart?.message}
+      defaultValue={defaultValues.secondTermStart}
+    />
+    <InputFieldWithError
+      label="Third Term Starts"
+      name="thirdTermStart"
+      type="date"
+      register={register}
+      error={errors.thirdTermStart?.message}
+      defaultValue={defaultValues.thirdTermStart}
+    />
+    <label className="flex items-center gap-2 text-xs text-gray-500 mt-2">
+      <input type="checkbox" {...register("isCurrent")} defaultChecked={defaultValues.isCurrent} />
+      <span>Mark as current session</span>
+    </label>
+  </div>
 
       <div className="flex flex-col gap-2">
         {errorMessage && <p className="text-sm text-red-500">{errorMessage}</p>}

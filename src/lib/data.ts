@@ -1,4 +1,4 @@
-﻿// TEMPORARY DATA
+// TEMPORARY DATA
 
 export type Role = "admin" | "teacher" | "student" | "parent";
 
@@ -30,7 +30,7 @@ export const schoolsData: School[] = [
     email: "central@bishopcrowther.edu.ng",
     principal: "Grace Ajayi",
     established: "2005",
-    logo: "/logos/central.png",
+    logo: "https://dummyimage.com/160x160/0f172a/ffffff.png&text=Central",
   },
   {
     id: "downtown",
@@ -44,7 +44,7 @@ export const schoolsData: School[] = [
     email: "downtown@bishopcrowther.edu.ng",
     principal: "Emeka Balogun",
     established: "2010",
-    logo: "/logos/downtown.png",
+    logo: "https://dummyimage.com/160x160/1d4ed8/ffffff.png&text=Downtown",
   },
   {
     id: "lakeside",
@@ -58,7 +58,7 @@ export const schoolsData: School[] = [
     email: "lakeside@bishopcrowther.edu.ng",
     principal: "Ngozi Peters",
     established: "2014",
-    logo: "/logos/lakeside.png",
+    logo: "https://dummyimage.com/160x160/047857/ffffff.png&text=Lakeside",
   },
 ];
 
@@ -1329,147 +1329,71 @@ export const announcementsData = [
 
 // YOU SHOULD CHANGE THE DATES OF THE EVENTS TO THE CURRENT DATE TO SEE THE EVENTS ON THE CALENDAR
 export const calendarEvents = [
+  // Central campus events
   {
-    title: "Math",
+    title: "Central Staff Briefing",
     allDay: false,
-    start: new Date(2024, 7, 12, 8, 0),
-    end: new Date(2024, 7, 12, 8, 45),
+    start: new Date(2024, 7, 12, 8, 30),
+    end: new Date(2024, 7, 12, 9, 15),
+    schoolId: "central",
   },
   {
-    title: "English",
-    allDay: false,
-    start: new Date(2024, 7, 12, 9, 0),
-    end: new Date(2024, 7, 12, 9, 45),
-  },
-  {
-    title: "Biology",
+    title: "Central: Mathematics Revision",
     allDay: false,
     start: new Date(2024, 7, 12, 10, 0),
     end: new Date(2024, 7, 12, 10, 45),
+    schoolId: "central",
   },
   {
-    title: "Physics",
+    title: "Central PTA Planning",
+    allDay: false,
+    start: new Date(2024, 7, 13, 12, 30),
+    end: new Date(2024, 7, 13, 13, 30),
+    schoolId: "central",
+  },
+  // Downtown campus events
+  {
+    title: "Downtown: Science Fair Prep",
+    allDay: false,
+    start: new Date(2024, 7, 12, 9, 0),
+    end: new Date(2024, 7, 12, 9, 45),
+    schoolId: "downtown",
+  },
+  {
+    title: "Downtown Assembly",
     allDay: false,
     start: new Date(2024, 7, 12, 11, 0),
     end: new Date(2024, 7, 12, 11, 45),
+    schoolId: "downtown",
   },
   {
-    title: "Chemistry",
-    allDay: false,
-    start: new Date(2024, 7, 12, 13, 0),
-    end: new Date(2024, 7, 12, 13, 45),
-  },
-  {
-    title: "History",
-    allDay: false,
-    start: new Date(2024, 7, 12, 14, 0),
-    end: new Date(2024, 7, 12, 14, 45),
-  },
-  {
-    title: "English",
-    allDay: false,
-    start: new Date(2024, 7, 13, 9, 0),
-    end: new Date(2024, 7, 13, 9, 45),
-  },
-  {
-    title: "Biology",
-    allDay: false,
-    start: new Date(2024, 7, 13, 10, 0),
-    end: new Date(2024, 7, 13, 10, 45),
-  },
-  {
-    title: "Physics",
-    allDay: false,
-    start: new Date(2024, 7, 13, 11, 0),
-    end: new Date(2024, 7, 13, 11, 45),
-  },
-
-  {
-    title: "History",
-    allDay: false,
-    start: new Date(2024, 7, 13, 14, 0),
-    end: new Date(2024, 7, 13, 14, 45),
-  },
-  {
-    title: "Math",
-    allDay: false,
-    start: new Date(2024, 7, 14, 8, 0),
-    end: new Date(2024, 7, 14, 8, 45),
-  },
-  {
-    title: "Biology",
-    allDay: false,
-    start: new Date(2024, 7, 14, 10, 0),
-    end: new Date(2024, 7, 14, 10, 45),
-  },
-
-  {
-    title: "Chemistry",
+    title: "Downtown: Debate Club",
     allDay: false,
     start: new Date(2024, 7, 14, 13, 0),
-    end: new Date(2024, 7, 14, 13, 45),
+    end: new Date(2024, 7, 14, 14, 0),
+    schoolId: "downtown",
+  },
+  // Lakeside campus events
+  {
+    title: "Lakeside: Music Rehearsal",
+    allDay: false,
+    start: new Date(2024, 7, 12, 8, 15),
+    end: new Date(2024, 7, 12, 9, 0),
+    schoolId: "lakeside",
   },
   {
-    title: "History",
+    title: "Lakeside Guidance Meeting",
     allDay: false,
-    start: new Date(2024, 7, 14, 14, 0),
-    end: new Date(2024, 7, 13, 14, 45),
+    start: new Date(2024, 7, 13, 10, 30),
+    end: new Date(2024, 7, 13, 11, 15),
+    schoolId: "lakeside",
   },
   {
-    title: "English",
+    title: "Lakeside: Yacht Club Briefing",
     allDay: false,
-    start: new Date(2024, 7, 15, 9, 0),
-    end: new Date(2024, 7, 15, 9, 45),
-  },
-  {
-    title: "Biology",
-    allDay: false,
-    start: new Date(2024, 7, 15, 10, 0),
-    end: new Date(2024, 7, 15, 10, 45),
-  },
-  {
-    title: "Physics",
-    allDay: false,
-    start: new Date(2024, 7, 15, 11, 0),
-    end: new Date(2024, 7, 15, 11, 45),
-  },
-
-  {
-    title: "History",
-    allDay: false,
-    start: new Date(2024, 7, 15, 14, 0),
-    end: new Date(2024, 7, 15, 14, 45),
-  },
-  {
-    title: "Math",
-    allDay: false,
-    start: new Date(2024, 7, 16, 8, 0),
-    end: new Date(2024, 7, 16, 8, 45),
-  },
-  {
-    title: "English",
-    allDay: false,
-    start: new Date(2024, 7, 16, 9, 0),
-    end: new Date(2024, 7, 16, 9, 45),
-  },
-
-  {
-    title: "Physics",
-    allDay: false,
-    start: new Date(2024, 7, 16, 11, 0),
-    end: new Date(2024, 7, 16, 11, 45),
-  },
-  {
-    title: "Chemistry",
-    allDay: false,
-    start: new Date(2024, 7, 16, 13, 0),
-    end: new Date(2024, 7, 16, 13, 45),
-  },
-  {
-    title: "History",
-    allDay: false,
-    start: new Date(2024, 7, 16, 14, 0),
-    end: new Date(2024, 7, 16, 14, 45),
+    start: new Date(2024, 7, 14, 15, 0),
+    end: new Date(2024, 7, 14, 16, 0),
+    schoolId: "lakeside",
   },
 ];
 
@@ -2192,6 +2116,8 @@ export const studentAttendanceData: StudentAttendanceRecord[] = [
     absent: 3,
   },
 ];
+
+
 
 
 

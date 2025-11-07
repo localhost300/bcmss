@@ -2,14 +2,29 @@
 
 import { Calendar, momentLocalizer, View, Views } from "react-big-calendar";
 import moment from "moment";
-import { calendarEvents } from "@/lib/data";
+import { useMemo, useState } from "react";
 import "react-big-calendar/lib/css/react-big-calendar.css";
-import { useState } from "react";
+import { calendarEvents } from "@/lib/data";
+import { useSchoolScope } from "@/contexts/SchoolContext";
 
 const localizer = momentLocalizer(moment);
 
 const BigCalendar = () => {
   const [view, setView] = useState<View>(Views.WORK_WEEK);
+  const schoolId = useSchoolScope();
+
+  const events = useMemo(() => {
+    if (!schoolId) {
+      return calendarEvents;
+    }
+    const scoped = calendarEvents.filter(
+      (event) => !("schoolId" in event) || event.schoolId == null || event.schoolId === schoolId,
+    );
+    if (scoped.length > 0) {
+      return scoped;
+    }
+    return calendarEvents.filter((event) => !("schoolId" in event) || event.schoolId == null);
+  }, [schoolId]);
 
   const handleOnChangeView = (selectedView: View) => {
     setView(selectedView);
@@ -18,7 +33,7 @@ const BigCalendar = () => {
   return (
     <Calendar
       localizer={localizer}
-      events={calendarEvents}
+      events={events}
       startAccessor="start"
       endAccessor="end"
       views={["work_week", "day"]}

@@ -1,6 +1,4 @@
 "use client";
-
-import Image from "next/image";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "react-toastify";
 
@@ -77,6 +75,7 @@ type ReportCardData = {
     category: "psychomotor" | "affective";
     traits: Array<{ trait: string; score: number }>;
   }>;
+  nextTermBeginsOn: string | null;
 };
 
 type StudentOption = {
@@ -240,7 +239,7 @@ const ReportCardGenerator = () => {
       setPrincipalRemark(
         principalRemarkFromAverage(payload.data.summaries.averageScore),
       );
-      setNextTermBegins("");
+      setNextTermBegins(payload.data.nextTermBeginsOn ?? "");
     } catch (error) {
       console.error("[ReportCard] Failed to load report sheet", error);
       toast.error(
@@ -249,6 +248,7 @@ const ReportCardGenerator = () => {
           : "Unable to generate report sheet. Please try again.",
       );
       setReport(null);
+      setNextTermBegins("");
     } finally {
       setLoadingReport(false);
     }
@@ -304,8 +304,8 @@ const ReportCardGenerator = () => {
 
   return (
     <div className="flex min-h-screen flex-col gap-6 bg-gray-50 p-6 text-gray-900">
-      <header className="flex flex-col justify-between gap-4 rounded-lg border border-gray-200 bg-white p-4 shadow-sm lg:flex-row lg:items-center">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-end">
+      <header className="flex flex-col justify-between gap-3 rounded-lg border border-gray-200 bg-white p-4 shadow-sm lg:flex-row lg:items-center">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-end">
           <div className="flex flex-col">
             <label className="text-xs font-semibold text-gray-500">
               Session
@@ -573,7 +573,7 @@ const ReportCardGenerator = () => {
             </table>
           </section>
 
-          <section className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <section className="mt-6 grid grid-cols-1 gap-3 lg:grid-cols-2">
             <div className="border border-gray-300">
               <h3 className="border-b border-gray-300 bg-gray-100 px-2 py-1.5 text-xs font-semibold uppercase">
                 Psychomotor Skills
@@ -634,7 +634,7 @@ const ReportCardGenerator = () => {
             </div>
           </section>
 
-          <section className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <section className="mt-6 grid grid-cols-1 gap-3 lg:grid-cols-2">
             <div className="border border-gray-300 p-4">
               <h3 className="mb-2 text-xs font-semibold uppercase">Attendance Summary</h3>
               <table className="w-full text-xs">
@@ -691,7 +691,7 @@ const ReportCardGenerator = () => {
             </div>
           </section>
 
-          <section className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <section className="mt-6 grid grid-cols-1 gap-3 lg:grid-cols-2">
             <div className="flex flex-col gap-2">
               <label className="text-xs font-semibold text-gray-700">
                 Class Teacher&apos;s Remark

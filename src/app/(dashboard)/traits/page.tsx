@@ -172,7 +172,7 @@ export default function TraitRatingPage() {
   }, [canAccess, selectedClassId]);
 
   useEffect(() => {
-    if (!selectedStudentId || !selectedTerm || !selectedSession?.name) {
+    if (!selectedStudentId || !selectedTerm || !selectedSessionId) {
       setTraitScores(buildInitialScores());
       return;
     }
@@ -183,7 +183,7 @@ export default function TraitRatingPage() {
         setInitialised(false);
         const query = new URLSearchParams({
           term: selectedTerm,
-          session: selectedSession.name,
+          session: selectedSessionId,
         });
         const data = await getJSON<{
           records: TraitRecord[];
@@ -206,7 +206,7 @@ export default function TraitRatingPage() {
     };
 
     void fetchTraits();
-  }, [selectedStudentId, selectedTerm, selectedSession?.name]);
+  }, [selectedStudentId, selectedTerm, selectedSessionId]);
 
   const handleScoreChange = (category: string, traitLabel: string, score: number) => {
     setTraitScores((prev) => ({
@@ -220,7 +220,7 @@ export default function TraitRatingPage() {
       toast.error("Please select a student.");
       return;
     }
-    if (!selectedSession?.name) {
+    if (!selectedSessionId) {
       toast.error("Please select a session.");
       return;
     }
@@ -260,7 +260,7 @@ export default function TraitRatingPage() {
         body: JSON.stringify({
           studentId: selectedStudentId,
           term: selectedTerm,
-          session: selectedSession.name,
+          session: selectedSessionId,
           ratings,
         }),
       });

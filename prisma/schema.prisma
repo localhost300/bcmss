@@ -257,6 +257,7 @@ model AcademicSession {
   createdAt         DateTime                  @default(now())
   updatedAt         DateTime                  @updatedAt
   markDistributions MarkDistribution[]
+  termSchedules     AcademicTermSchedule[]
 }
 
 model AcademicSessionOnSchool {
@@ -267,6 +268,20 @@ model AcademicSessionOnSchool {
   school    School          @relation(fields: [schoolId], references: [id])
 
   @@unique([sessionId, schoolId])
+}
+
+model AcademicTermSchedule {
+  id        String           @id @default(cuid())
+  sessionId String
+  term      Term
+  startsAt  DateTime
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+
+  session AcademicSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, term])
+  @@index([sessionId])
 }
 
 model Exam {

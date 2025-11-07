@@ -1,4 +1,4 @@
-import { Prisma, StudentScoreRecord } from "@prisma/client";
+import { Prisma, StudentScoreRecord, Term } from "@prisma/client";
 
 import prisma from "@/lib/prisma";
 import { getGradeForScore } from "@/lib/grades";
@@ -99,6 +99,7 @@ export type ReportCardData = {
   };
   subjects: SubjectBreakdown[];
   traits: TraitGroup[];
+  nextTermBeginsOn: string | null;
 };
 
 const TERM_NORMALISER: Record<string, TermLabel> = {
@@ -110,6 +111,17 @@ const TERM_NORMALISER: Record<string, TermLabel> = {
   "third": "Third Term",
 };
 
+const NEXT_TERM_LOOKUP: Record<TermLabel, TermLabel | null> = {
+  "First Term": "Second Term",
+  "Second Term": "Third Term",
+  "Third Term": null,
+};
+
+const TERM_ENUM_BY_LABEL: Record<TermLabel, Term> = {
+  "First Term": Term.FIRST,
+  "Second Term": Term.SECOND,
+  "Third Term": Term.THIRD,
+};
 const COMPONENT_MATCHERS = {
   ca1: ["ca1", "continuous assessment 1", "weekly test 1"],
   ca2: ["ca2", "continuous assessment 2", "assignment", "project", "test"],
@@ -123,6 +135,32 @@ const normaliseTerm = (term: string): TermLabel => {
     throw new InvalidIdError("Unsupported academic term supplied.");
   }
   return mapped;
+};
+
+const resolveNextTermStart = async (
+  sessionId: string,
+  currentTerm: TermLabel,
+): Promise<string | null> => {
+  const nextTermLabel = NEXT_TERM_LOOKUP[currentTerm];
+  if (!nextTermLabel) {
+    return null;
+  }
+
+  const schedule = await prisma.academicTermSchedule.findUnique({
+    where: {
+      sessionId_term: {
+        sessionId,
+        term: TERM_ENUM_BY_LABEL[nextTermLabel],
+      },
+    },
+    select: { startsAt: true },
+  });
+
+  if (!schedule?.startsAt) {
+    return null;
+  }
+
+  return schedule.startsAt.toISOString().slice(0, 10);
 };
 
 const asNumber = (value: unknown): number | null => {
@@ -430,8 +468,9 @@ const groupTraits = (entries: Array<{ category: string; trait: string; score: nu
   };
 
   entries.forEach((entry) => {
-    if (entry.category === "psychomotor" || entry.category === "affective") {
-      grouped[entry.category].push({
+    const category = entry.category.trim().toLowerCase();
+    if (category === "psychomotor" || category === "affective") {
+      grouped[category].push({
         trait: entry.trait,
         score: entry.score,
       });
@@ -624,6 +663,8 @@ export async function buildStudentReportCard({
     })),
   );
 
+  const nextTermBeginsOn = await resolveNextTermStart(session.id, term);
+
   return {
     school: {
       id: student.school.id,
@@ -668,5 +709,6 @@ export async function buildStudentReportCard({
     },
     subjects,
     traits,
+    nextTermBeginsOn,
   };
 }
